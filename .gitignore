@@ -1,0 +1,8 @@
+.env
+venv/
+__pycache__/
+*.pyc
+pocket_cfo.db
+*.log
+temp_voice_*.ogg
+.DS_Store

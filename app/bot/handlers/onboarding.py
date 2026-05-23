@@ -1,0 +1,55 @@
+from aiogram import Router, F
+from aiogram.filters import CommandStart, Command
+from aiogram.types import Message
+from sqlalchemy.future import select
+from sqlalchemy import delete
+from app.database.session import async_session_maker
+from app.database.models import User, Envelope, Transaction, ChatMessage
+
+router = Router()
+
+@router.message(Command("reset"))
+async def cmd_reset(message: Message):
+    async with async_session_maker() as session:
+        # Delete user's data (Cascade handles transactions and envelopes if configured, but explicit is safer)
+        await session.execute(delete(ChatMessage).where(ChatMessage.user_id == message.from_user.id))
+        await session.execute(delete(Transaction).where(Transaction.user_id == message.from_user.id))
+        await session.execute(delete(Envelope).where(Envelope.user_id == message.from_user.id))
+        await session.execute(delete(User).where(User.telegram_id == message.from_user.id))
+        await session.commit()
+        
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    persistent_keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📊 Мой бюджет")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer("🧹 Все твои данные, конверты и история памяти полностью удалены! Напиши /start, чтобы начать с чистого листа.", reply_markup=persistent_keyboard)
+
+@router.message(CommandStart())
+async def cmd_start(message: Message):
+    async with async_session_maker() as session:
+        result = await session.execute(select(User).where(User.telegram_id == message.from_user.id))
+        user = result.scalar_one_or_none()
+        
+        if not user:
+            user = User(telegram_id=message.from_user.id)
+            session.add(user)
+            await session.commit()
+            
+            welcome_text = (
+                "👋 Привет! Я Pocket CFO — твой карманный ИИ-финдиректор.\n\n"
+                "<b>Как работаем:</b>\n\n"
+                "🎤 Запиши голосовое или напиши текстом: сколько зарабатываешь, какие есть обязательные платежи, долги и на что копишь. Я составлю финансовый план и создам фонды.\n\n"
+                "<i>Или просто начни писать расходы — разберёмся по ходу.</i>"
+            )
+        else:
+            welcome_text = "С возвращением! Я помню все твои цели. Жду расходы, доходы или вопросы! (Если хочешь начать жизнь с чистого листа, нажми /reset)"
+            
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    persistent_keyboard = ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="📊 Мой бюджет")]],
+        resize_keyboard=True,
+        is_persistent=True
+    )
+    await message.answer(welcome_text, parse_mode="HTML", reply_markup=persistent_keyboard)
