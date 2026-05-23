@@ -1,0 +1,9 @@
+.git
+.gitignore
+venv/
+__pycache__/
+*.pyc
+.env
+pocket_cfo.db
+*.log
+.DS_Store
