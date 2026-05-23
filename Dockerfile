@@ -7,17 +7,15 @@ ENV PYTHONPATH=/app
 
 WORKDIR /app
 
-# Установка системных зависимостей (если нужны для компиляции некоторых пакетов)
+# Установка системных зависимостей
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     && rm -rf /var/lib/apt/lists/*
 
 # Копирование файла зависимостей
-COPY requirements.txt .
-
-# Установка зависимостей (если нет requirements.txt, используем pip freeze или pyproject.toml)
-# Поскольку у нас pyproject.toml:
 COPY pyproject.toml .
+
+# Установка зависимостей
 RUN pip install --upgrade pip && pip install setuptools wheel && pip install .
 
 # Копирование исходного кода проекта
