@@ -60,3 +60,17 @@ class ChatMessage(Base):
     datetime_created: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     user = relationship("User")
+
+
+class UserNudge(Base):
+    __tablename__ = "user_nudges"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.telegram_id"))
+    nudge_type: Mapped[str] = mapped_column(String)  # 're_engagement', 'low_balance', 'positive'
+    envelope_id: Mapped[Optional[int]] = mapped_column(ForeignKey("envelopes.id"), nullable=True)
+    datetime_sent: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User")
+    envelope = relationship("Envelope")
+

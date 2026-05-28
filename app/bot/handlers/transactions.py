@@ -172,34 +172,129 @@ def get_health_status(envelopes: list) -> str:
     return "🟢 <b>Состояние:</b> Отличное (долгов нет, фокус на капитал)"
 
 
-def get_financial_insight(envelopes: list) -> str:
+def calculate_forecasts(envelopes: list, monthly_income: float) -> dict:
+    # 1. Расчет месячных расходов (не долги, не цели, не буфер, не нераспределенные)
+    expense_envs = [
+        e for e in envelopes 
+        if not getattr(e, 'is_debt', False) 
+        and not getattr(e, 'is_goal', False) 
+        and "буфер" not in e.name.lower()
+        and e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")
+    ]
+    monthly_expenses = sum(e.target_amount or 0 for e in expense_envs if (e.target_amount or 0) > 0)
+    free_cash = monthly_income - monthly_expenses
+    
+    if free_cash <= 0:
+        return {"status": "negative_or_zero", "free_cash": free_cash}
+
+    # 2. Активные долги (сортировка: сначала меньшие остатки - Snowball)
+    debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
+    active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
+    active_debts.sort(key=lambda x: (x.target_amount or 0) - x.current_amount)
+
+    # 3. Активные цели (сортировка по приоритету / остатку)
+    goal_envs = [e for e in envelopes if getattr(e, 'is_goal', False) and "буфер" not in e.name.lower()]
+    active_goals = [g for g in goal_envs if (g.target_amount or 0) - g.current_amount > 0]
+
+    # Моделирование
+    sim_items = []
+    for d in active_debts:
+        sim_items.append({
+            "name": d.name,
+            "remaining": (d.target_amount or 0) - d.current_amount,
+            "is_debt": True
+        })
+    for g in active_goals:
+        sim_items.append({
+            "name": g.name,
+            "remaining": (g.target_amount or 0) - g.current_amount,
+            "is_debt": False
+        })
+
+    completed = {}
+    current_month = 0
+    max_months = 120
+    
+    while any(item["remaining"] > 0 for item in sim_items) and current_month < max_months:
+        current_month += 1
+        available = free_cash
+        for item in sim_items:
+            if item["remaining"] > 0:
+                if available >= item["remaining"]:
+                    available -= item["remaining"]
+                    item["remaining"] = 0.0
+                    completed[item["name"]] = current_month
+                else:
+                    item["remaining"] -= available
+                    available = 0.0
+                    break
+
+    return {
+        "status": "ok",
+        "free_cash": free_cash,
+        "completed": completed
+    }
+
+
+def fmt_months_ru(n: int) -> str:
+    if n == 1:
+        return "в следующем месяце"
+    if n % 100 in (11, 12, 13, 14):
+        return f"через {n} месяцев"
+    elif n % 10 == 1:
+        return f"через {n} месяц"
+    elif n % 10 in (2, 3, 4):
+        return f"через {n} месяца"
+    else:
+        return f"через {n} месяцев"
+
+
+def get_financial_insight(envelopes: list, monthly_income: float = 0.0) -> str:
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
     buffer_env = next((e for e in envelopes if "буфер" in e.name.lower()), None)
     
+    insight = ""
     # 1. Zero Buffer Alert
     if not buffer_env or buffer_env.current_amount <= 0:
-        return "⚠️ <b>Следующий шаг:</b> С ближайшего дохода нужно заложить хотя бы минимальный буфер. Жить без подушки небезопасно."
+        insight = "⚠️ <b>Следующий шаг:</b> С ближайшего дохода нужно заложить хотя бы минимальный буфер. Жить без подушки небезопасно."
     
     # 2. Easy Debt Win
-    if debt_envs:
+    elif debt_envs and [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]:
         active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
-        if active_debts:
-            active_debts.sort(key=lambda x: (x.target_amount or 0) - x.current_amount)
-            smallest_debt = active_debts[0]
-            remaining = (smallest_debt.target_amount or 0) - smallest_debt.current_amount
-            if remaining < 10000:
-                return f"🔥 <b>Следующий шаг:</b> Добить остаток по «{smallest_debt.name}» ({fmt_money(remaining)}). Один рывок — и минус один долг!"
-            return "💡 <b>Фокус:</b> Продолжаем методично гасить кредиты. Каждая тысяча сверх минимума экономит тебе время и проценты."
+        active_debts.sort(key=lambda x: (x.target_amount or 0) - x.current_amount)
+        smallest_debt = active_debts[0]
+        remaining = (smallest_debt.target_amount or 0) - smallest_debt.current_amount
+        if remaining < 10000:
+            insight = f"🔥 <b>Следующий шаг:</b> Добить остаток по «{smallest_debt.name}» ({fmt_money(remaining)}). Один рывок — и минус один долг!"
+        else:
+            insight = "💡 <b>Фокус:</b> Продолжаем методично гасить кредиты. Каждая тысяча сверх минимума экономит тебе время и проценты."
             
     # 3. Growth Phase
-    goal_envs = [e for e in envelopes if getattr(e, 'is_goal', False) and "буфер" not in e.name.lower()]
-    if goal_envs:
-        return "🚀 <b>Фокус:</b> Бюджет сбалансирован. Все свободные деньги теперь работают на твои цели!"
+    else:
+        goal_envs = [e for e in envelopes if getattr(e, 'is_goal', False) and "буфер" not in e.name.lower()]
+        if goal_envs:
+            insight = "🚀 <b>Фокус:</b> Бюджет сбалансирован. Все свободные деньги теперь работают на твои цели!"
+        else:
+            insight = "💡 Бюджет в норме. Распределяй новые доходы по правилу: сначала плати себе (буфер), потом трать."
+            
+    # Добавляем блок прогнозов
+    if monthly_income > 0:
+        forecast = calculate_forecasts(envelopes, monthly_income)
+        if forecast["status"] == "ok" and forecast["completed"]:
+            lines = []
+            for name, months in forecast["completed"].items():
+                lines.append(f"• {name}: {fmt_months_ru(months)}")
+            forecast_text = "\n📅 <b>Если придерживаться плана:</b>\n" + "\n".join(lines)
+            insight += "\n" + forecast_text
+        elif forecast["status"] == "negative_or_zero":
+            insight += "\n⚠️ <i>Расходы превышают доходы или равны им. Сбалансируй бюджет, чтобы начать гасить долги.</i>"
+    else:
+        insight += "\n💡 <i>Задай месячный доход (например: «мой доход 100к»), чтобы увидеть прогноз закрытия долгов и целей.</i>"
         
-    return "💡 Бюджет в норме. Распределяй новые доходы по правилу: сначала плати себе (буфер), потом трать."
+    return insight
 
 
-def build_dashboard(envelopes: list) -> str:
+def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
     expense_lines = []
     goal_lines = []
     debt_lines = []
@@ -229,7 +324,7 @@ def build_dashboard(envelopes: list) -> str:
     # Emotional UX: Health Status & Insights
     if len(envelopes) > 1:
         parts.append(get_health_status(envelopes))
-        parts.append(get_financial_insight(envelopes) + "\n")
+        parts.append(get_financial_insight(envelopes, monthly_income=monthly_income) + "\n")
 
     if expense_lines:
         parts.append("🛍 <b>На расходы:</b>\n" + "\n".join(expense_lines))
@@ -279,7 +374,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
 
             if _is_dashboard_request(text):
                 session.add(ChatMessage(user_id=user.telegram_id, role="user", content=text))
-                dashboard = build_dashboard(envelopes)
+                dashboard = build_dashboard(envelopes, monthly_income=user.monthly_income or 0)
                 session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=dashboard))
                 await session.commit()
                 await message.answer(dashboard, parse_mode="HTML")
@@ -621,7 +716,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 await session.flush()
                 env_result2 = await session.execute(select(Envelope).where(Envelope.user_id == user.telegram_id))
                 fresh_envelopes = list(env_result2.scalars().all())
-                brain_response.coach_reply += "\n\n" + build_dashboard(fresh_envelopes)
+                brain_response.coach_reply += "\n\n" + build_dashboard(fresh_envelopes, monthly_income=user.monthly_income or 0)
 
             session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=brain_response.coach_reply))
             await session.commit()
@@ -801,12 +896,18 @@ async def show_envelopes_callback(callback):
             select(Envelope).where(Envelope.user_id == callback.from_user.id)
         )
         envelopes = list(env_result.scalars().all())
+        
+        user_result = await session.execute(
+            select(User).where(User.telegram_id == callback.from_user.id)
+        )
+        user = user_result.scalar_one_or_none()
+        monthly_income = user.monthly_income if user else 0.0
 
     if not envelopes:
         await callback.answer("Бюджет пока пуст")
         return
 
-    dashboard = build_dashboard(envelopes)
+    dashboard = build_dashboard(envelopes, monthly_income=monthly_income)
     try:
         await callback.message.edit_text(dashboard, parse_mode="HTML")
     except Exception:

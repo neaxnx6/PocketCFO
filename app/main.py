@@ -32,6 +32,8 @@ async def root():
 async def start_polling():
     if bot and dp:
         logger.info("Starting Telegram Bot Polling...")
+        from app.services.nudge_service import run_nudge_scheduler
+        asyncio.create_task(run_nudge_scheduler(bot))
         await dp.start_polling(bot, skip_updates=True)
 
 if __name__ == "__main__":
