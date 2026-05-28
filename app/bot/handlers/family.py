@@ -66,7 +66,7 @@ async def get_user_family_status(user: User, session) -> tuple[str, Optional[Inl
     code_str = f"<code>{user.invite_code}</code>" if user.invite_code else "не сгенерирован"
     text = (
         "👥 <b>Семейный бюджет</b>\n\n"
-        "Pocket CFO позволяет объединить бюджеты с партнёром:\n"
+        "«На Балансе» позволяет объединить бюджеты с партнёром:\n"
         "• Совместные конверты расходов, целей и долгов\n"
         "• Общий финансовый дашборд и прогнозы\n"
         "• Раздельные чаты с ИИ (партнёр не увидит твою переписку)\n\n"

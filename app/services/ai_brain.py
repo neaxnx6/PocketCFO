@@ -87,7 +87,7 @@ async def process_user_message(
     chat_history: List[dict]
 ) -> BrainResponse:
     system_prompt = (
-        f"Ты — Pocket CFO, карманный финансовый стратег. Твой стиль: {user_vibe}.\n"
+        f"Ты — ИИ-помощник «На Балансе», твой стиль: {user_vibe}.\n"
         "Ты честный, прямой и конкретный. Не льстишь и не преуменьшаешь проблемы.\n\n"
         f"ТВОИ КОНВЕРТЫ:\n{envelopes_context}\n\n"
         f"ФИН. ЗДОРОВЬЕ:\n{financial_health}\n\n"

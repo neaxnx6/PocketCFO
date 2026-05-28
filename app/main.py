@@ -11,7 +11,7 @@ logging.getLogger("app").setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 # FastAPI app
-app = FastAPI(title="Pocket CFO MVP")
+app = FastAPI(title="На Балансе MVP")
 
 # Bot Setup
 if settings.BOT_TOKEN != "placeholder_token":
@@ -28,7 +28,7 @@ else:
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "message": "Pocket CFO is running"}
+    return {"status": "ok", "message": "На Балансе is running"}
 
 async def start_polling():
     if bot and dp:
