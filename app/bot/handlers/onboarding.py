@@ -1,16 +1,49 @@
-from aiogram import Router, F
+from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
 from sqlalchemy.future import select
-from sqlalchemy import delete
+from sqlalchemy import delete, update
 from app.database.session import async_session_maker
 from app.database.models import User, Envelope, Transaction, ChatMessage
 
 router = Router()
 
 @router.message(Command("reset"))
-async def cmd_reset(message: Message):
+async def cmd_reset(message: Message, bot: Bot = None):
     async with async_session_maker() as session:
+        # Find user first
+        user_result = await session.execute(select(User).where(User.telegram_id == message.from_user.id))
+        user = user_result.scalar_one_or_none()
+        
+        if user:
+            # If user is a host, get members and notify them, then reset their family_host_id
+            members_result = await session.execute(select(User).where(User.family_host_id == message.from_user.id))
+            members = list(members_result.scalars().all())
+            for m in members:
+                m.family_host_id = None
+                if bot:
+                    try:
+                        await bot.send_message(
+                            m.telegram_id,
+                            "🚪 <b>Семейный бюджет распущен</b>\n\n"
+                            "Владелец бюджета полностью сбросил свои данные. Ты возвращён в соло-режим.",
+                            parse_mode="HTML"
+                        )
+                    except Exception:
+                        pass
+            
+            # If user is a member, notify host
+            if user.family_host_id and bot:
+                try:
+                    await bot.send_message(
+                        user.family_host_id,
+                        "🚪 <b>Участник вышел из бюджета</b>\n\n"
+                        "Пользователь отключился от твоего семейного бюджета (сбросил данные).",
+                        parse_mode="HTML"
+                    )
+                except Exception:
+                    pass
+
         # Delete user's data (Cascade handles transactions and envelopes if configured, but explicit is safer)
         await session.execute(delete(ChatMessage).where(ChatMessage.user_id == message.from_user.id))
         await session.execute(delete(Transaction).where(Transaction.user_id == message.from_user.id))

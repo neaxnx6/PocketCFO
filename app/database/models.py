@@ -16,8 +16,13 @@ class User(Base):
     state: Mapped[Optional[str]] = mapped_column(String, nullable=True)
     monthly_income: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
 
+    # Семейный режим
+    family_host_id: Mapped[Optional[int]] = mapped_column(BigInteger, ForeignKey("users.telegram_id"), nullable=True)
+    invite_code: Mapped[Optional[str]] = mapped_column(String, nullable=True, unique=True)
+
     envelopes = relationship("Envelope", back_populates="user", cascade="all, delete-orphan")
     transactions = relationship("Transaction", back_populates="user", cascade="all, delete-orphan")
+
 
 
 class Envelope(Base):

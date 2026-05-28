@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 from fastapi import FastAPI
 
 from app.config import settings
-from app.bot.handlers import onboarding, transactions
+from app.bot.handlers import onboarding, transactions, family
 
 logging.basicConfig(level=logging.WARNING)
 logging.getLogger("app").setLevel(logging.INFO)
@@ -19,6 +19,7 @@ if settings.BOT_TOKEN != "placeholder_token":
     dp = Dispatcher()
 
     dp.include_router(onboarding.router)
+    dp.include_router(family.router)
     dp.include_router(transactions.router)
 else:
     bot = None

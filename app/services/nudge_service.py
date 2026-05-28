@@ -33,9 +33,20 @@ async def check_and_send_nudges(bot: Bot):
 
         for user in users:
             try:
-                # Получаем все конверты пользователя
+                # 0. Определяем владельца бюджета
+                budget_owner = user
+                if user.family_host_id:
+                    host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+                    host = host_result.scalar_one_or_none()
+                    if host:
+                        budget_owner = host
+                    else:
+                        user.family_host_id = None
+                        await session.flush()
+
+                # Получаем все конверты владельца бюджета
                 env_result = await session.execute(
-                    select(Envelope).where(Envelope.user_id == user.telegram_id)
+                    select(Envelope).where(Envelope.user_id == budget_owner.telegram_id)
                 )
                 envelopes = list(env_result.scalars().all())
 
@@ -49,7 +60,7 @@ async def check_and_send_nudges(bot: Bot):
                 await check_low_balances(session, bot, user, envelopes)
 
                 # 3. Проверка Positive Reinforcement (прогресс по долгам)
-                await check_debt_progress(session, bot, user)
+                await check_debt_progress(session, bot, user, budget_owner)
 
             except Exception as e:
                 logger.error(f"Error checking nudges for user {user.telegram_id}: {e}", exc_info=True)
@@ -148,7 +159,7 @@ async def check_low_balances(session, bot: Bot, user: User, envelopes: list):
                     logger.warning(f"Failed to send low_balance nudge to user {user.telegram_id}: {e}")
 
 
-async def check_debt_progress(session, bot: Bot, user: User):
+async def check_debt_progress(session, bot: Bot, user: User, budget_owner: User):
     # Проверяем уменьшение долгов за последние 7 дней
     # Ищем транзакции пользователя по конвертам долгов за 7 дней
     now = datetime.utcnow()
@@ -166,23 +177,30 @@ async def check_debt_progress(session, bot: Bot, user: User):
     if already_sent:
         return
 
-    # Находим все конверты-долги
+    # Находим все конверты-долги владельца бюджета
     env_result = await session.execute(
         select(Envelope).where(
-            and_(Envelope.user_id == user.telegram_id, Envelope.is_debt == True)
+            and_(Envelope.user_id == budget_owner.telegram_id, Envelope.is_debt == True)
         )
     )
     debt_envs = env_result.scalars().all()
     if not debt_envs:
         return
 
-    # Считаем сумму пополнений (транзакций с положительным amount) в эти конверты за неделю
+    # Считаем сумму пополнений (транзакций с положительным amount) в эти конверты за неделю от любого члена семьи
     debt_env_ids = [d.id for d in debt_envs]
+    
+    family_user_ids = [budget_owner.telegram_id]
+    member_result = await session.execute(
+        select(User.telegram_id).where(User.family_host_id == budget_owner.telegram_id)
+    )
+    family_user_ids.extend(member_result.scalars().all())
+
     tx_result = await session.execute(
         select(func.sum(Transaction.amount))
         .where(
             and_(
-                Transaction.user_id == user.telegram_id,
+                Transaction.user_id.in_(family_user_ids),
                 Transaction.envelope_id.in_(debt_env_ids),
                 Transaction.amount > 0,
                 Transaction.datetime_created > now - timedelta(days=7)

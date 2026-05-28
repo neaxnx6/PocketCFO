@@ -364,17 +364,27 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 await message.answer("Сначала нажми /start")
                 return
 
-            env_result = await session.execute(select(Envelope).where(Envelope.user_id == user.telegram_id))
+            budget_owner = user
+            if user.family_host_id:
+                host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+                host = host_result.scalar_one_or_none()
+                if host:
+                    budget_owner = host
+                else:
+                    user.family_host_id = None
+                    await session.flush()
+
+            env_result = await session.execute(select(Envelope).where(Envelope.user_id == budget_owner.telegram_id))
             envelopes = list(env_result.scalars().all())
             if not envelopes:
-                env = Envelope(user_id=user.telegram_id, name="Нераспределённые", current_amount=0)
+                env = Envelope(user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0)
                 session.add(env)
                 await session.commit()
                 envelopes = [env]
 
             if _is_dashboard_request(text):
                 session.add(ChatMessage(user_id=user.telegram_id, role="user", content=text))
-                dashboard = build_dashboard(envelopes, monthly_income=user.monthly_income or 0)
+                dashboard = build_dashboard(envelopes, monthly_income=budget_owner.monthly_income or 0)
                 session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=dashboard))
                 await session.commit()
                 await message.answer(dashboard, parse_mode="HTML")
@@ -423,7 +433,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 animation_task = asyncio.create_task(animate_messages(message.chat.id, phrases))
 
             env_context = build_envelopes_context(envelopes)
-            financial_health = build_financial_health(envelopes, monthly_income=user.monthly_income or 0)
+            financial_health = build_financial_health(envelopes, monthly_income=budget_owner.monthly_income or 0)
 
             chat_result = await session.execute(
                 select(ChatMessage)
@@ -487,7 +497,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             target_env = _find_envelope(envelopes, tx_data.target_envelope_name)
                         if not target_env:
                             target_env = envelopes[0] if envelopes else Envelope(
-                                user_id=user.telegram_id, name="Нераспределённые", current_amount=0
+                                user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0
                             )
 
                         expense_amount = abs(tx_data.amount)
@@ -542,7 +552,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                         unallocated = _find_unallocated(envelopes)
                         if not unallocated:
                             unallocated = Envelope(
-                                user_id=user.telegram_id, name="Нераспределённые", current_amount=0
+                                user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0
                             )
                             session.add(unallocated)
                             await session.flush()
@@ -587,7 +597,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                         existing = _find_envelope(envelopes, env_data.name)
                         if not existing:
                             new_env = Envelope(
-                                user_id=user.telegram_id,
+                                user_id=budget_owner.telegram_id,
                                 name=env_data.name,
                                 target_amount=env_data.target_amount,
                                 current_amount=env_data.current_amount,
@@ -611,7 +621,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             affected_envs.append(existing)
                         else:
                             new_env = Envelope(
-                                user_id=user.telegram_id,
+                                user_id=budget_owner.telegram_id,
                                 name=env_data.name,
                                 target_amount=env_data.target_amount,
                                 current_amount=env_data.current_amount,
@@ -626,12 +636,12 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             envelopes.append(ae)
 
                 if brain_response.monthly_income:
-                    user.monthly_income = brain_response.monthly_income
+                    budget_owner.monthly_income = brain_response.monthly_income
 
                 unallocated = _find_unallocated(envelopes)
                 if not unallocated:
                     unallocated = Envelope(
-                        user_id=user.telegram_id, name="Нераспределённые", current_amount=0
+                        user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0
                     )
                     session.add(unallocated)
                     await session.flush()
@@ -653,7 +663,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             is_debt = "долг" in pi.name.lower() or "кредит" in pi.name.lower()
                             is_goal = not is_debt # Treat unknown as goals
                             target = Envelope(
-                                user_id=user.telegram_id,
+                                user_id=budget_owner.telegram_id,
                                 name=pi.name,
                                 target_amount=amount, # rough estimate
                                 current_amount=0,
@@ -714,9 +724,9 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
             force_dashboard = _is_dashboard_request(text)
             if force_dashboard:
                 await session.flush()
-                env_result2 = await session.execute(select(Envelope).where(Envelope.user_id == user.telegram_id))
+                env_result2 = await session.execute(select(Envelope).where(Envelope.user_id == budget_owner.telegram_id))
                 fresh_envelopes = list(env_result2.scalars().all())
-                brain_response.coach_reply += "\n\n" + build_dashboard(fresh_envelopes, monthly_income=user.monthly_income or 0)
+                brain_response.coach_reply += "\n\n" + build_dashboard(fresh_envelopes, monthly_income=budget_owner.monthly_income or 0)
 
             session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=brain_response.coach_reply))
             await session.commit()
@@ -818,6 +828,19 @@ async def confirm_income(callback, state: FSMContext):
     alloc_amounts = data.get("alloc_amounts", [])
 
     async with async_session_maker() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        user = user_result.scalar_one_or_none()
+        
+        budget_owner = user
+        if user and user.family_host_id:
+            host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+            host = host_result.scalar_one_or_none()
+            if host:
+                budget_owner = host
+            else:
+                user.family_host_id = None
+                await session.flush()
+
         result = await session.execute(select(Envelope).where(Envelope.id == unallocated_env_id))
         unallocated = result.scalar_one_or_none()
 
@@ -832,7 +855,7 @@ async def confirm_income(callback, state: FSMContext):
                 continue
             env_result = await session.execute(
                 select(Envelope).where(
-                    Envelope.user_id == callback.from_user.id,
+                    Envelope.user_id == budget_owner.telegram_id,
                     Envelope.name.ilike(name.strip())
                 )
             )
@@ -842,7 +865,7 @@ async def confirm_income(callback, state: FSMContext):
                 is_debt = "долг" in name.lower() or "кредит" in name.lower()
                 is_goal = any(w in name.lower() for w in ["отпуск", "подушка", "накоп", "на ", "цель"])
                 target_env = Envelope(
-                    user_id=callback.from_user.id,
+                    user_id=budget_owner.telegram_id,
                     name=name,
                     current_amount=0,
                     is_debt=is_debt,
@@ -892,16 +915,26 @@ async def reject_income(callback, state: FSMContext):
 @router.callback_query(F.data == "show_envelopes")
 async def show_envelopes_callback(callback):
     async with async_session_maker() as session:
-        env_result = await session.execute(
-            select(Envelope).where(Envelope.user_id == callback.from_user.id)
-        )
-        envelopes = list(env_result.scalars().all())
-        
         user_result = await session.execute(
             select(User).where(User.telegram_id == callback.from_user.id)
         )
         user = user_result.scalar_one_or_none()
-        monthly_income = user.monthly_income if user else 0.0
+        
+        budget_owner = user
+        if user and user.family_host_id:
+            host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+            host = host_result.scalar_one_or_none()
+            if host:
+                budget_owner = host
+            else:
+                user.family_host_id = None
+                await session.flush()
+        
+        env_result = await session.execute(
+            select(Envelope).where(Envelope.user_id == budget_owner.telegram_id)
+        )
+        envelopes = list(env_result.scalars().all())
+        monthly_income = budget_owner.monthly_income if budget_owner else 0.0
 
     if not envelopes:
         await callback.answer("Бюджет пока пуст")
