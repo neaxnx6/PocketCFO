@@ -1,70 +1,40 @@
-# Концепция бренда «На Балансе» (Ретро-киберпанк / Sega 16-bit)
+# Концепция бренда «На Балансе» (Ретро-минимализм / Sega Flat Style)
 
-Этот документ представляет детальный визуальный стиль, логотипы, шрифтовые пары, цветовую палитру и элементы интерфейса для B2B SaaS MVP финансового ИИ-ассистента **«На Балансе»**. Стиль вдохновлен 16-битной эпохой Sega Mega Drive и эстетикой ретро-киберпанка.
-
----
-
-## 1. Обновление концепта на основе фидбека
-
-На основе обратной связи от клиента мы отказались от чисто векторного SVG-логотипа в пользу **высококачественной растровой графики, сгенерированной с помощью ИИ (Imagen/Midjourney/DALL-E 3)**. Это позволило уйти от «топорных» векторных линий к богатым текстурам, правильному неоновому свечению, настоящему дизерингу (dithering) и CRT-эффекту старого телевизора, воссоздавая ту самую атмосферу 16-битных игр Sega Mega Drive.
-
-### Метафорические решения:
-1. **Гибрид $ и @**: Слияние символа финансов и адреса Telegram в единый динамичный пиксельный глиф.
-2. **Ретро-монетка Sega ($)**: Альтернативное решение с объемной 3D-монеткой в стиле Sega-аркад, гарантирующее идеальное отображение без визуальной каши.
+Этот документ представляет собой описание визуального стиля и содержит промпты для генерации логотипа и аватарки Telegram-бота **«На Балансе»**. Концепт переработан на основе обратной связи для создания современного, минималистичного и в то же время ретро-ориентированного продукта.
 
 ---
 
-## 2. Сгенерированные ИИ аватарки (High-Res PNG)
+## 1. Геометрия знака (Слияние $ и @)
 
-Мы сгенерировали два качественных варианта аватарок и сохранили их в папку проекта `/assets/branding/`.
-
-````carousel
-![Вариант 1: Кибер-гибрид $@](./retro_hybrid_avatar.png)
-<!-- slide -->
-![Вариант 2: Ретро-монетка Sega](./retro_coin_avatar.png)
-````
-
-### Описание вариантов и ссылки на файлы:
-
-1. **[Вариант 1: Кибер-гибрид $@](./retro_hybrid_avatar.png)**
-   * **Суть**: В центре находится яркий неоново-зеленый глиф, объединяющий знак доллара ($) и спираль «собачки» (@). 
-   * **Детали**: Наклонный динамичный силуэт с шахматным пиксельным заполнением (dithering), ярким свечением (neon glow) на абсолютно черном фоне с бирюзовой перспективной кибер-сеткой.
-   * **Промпт для Midjourney/DALL-E 3**:
-     > `A high-quality circular Telegram avatar of a retro-cyberpunk style Sega 16-bit financial icon. The icon features a digital neon-green symbol that seamlessly merges the dollar sign '$' and the 'at' sign '@' into a single dynamic, slanted blocky glyph. The symbol has a bright glowing neon lime green (#00FF66) outline and deep forest green inner gradients with a subtle checkerboard dithering pattern for a 16-bit arcade volume. The background is pitch black with a glowing cyan cyber grid perspective and faint horizontal CRT scanline texture, capturing the aesthetic of 90s Sega Genesis start screens, clean pixel art, vibrant cyber-neon contrast, centered composition.`
-
-2. **[Вариант 2: Ретро-монетка Sega ($)](./retro_coin_avatar.png)**
-   * **Суть**: Более чистый и считываемый образ. Золотая монета с зеленым отливом и объемным знаком доллара ($) в центре.
-   * **Детали**: Текстура пикселей с резкими краями (aliased look), диагональные неоновые линии скорости (speedlines) на фоне, имитирующие загрузочные экраны Sega-картриджей. Выглядит аккуратно и дорого.
-   * **Промпт для Midjourney/DALL-E 3**:
-     > `A high-quality circular Telegram avatar of a retro 16-bit arcade style financial gold-and-green coin. In the center of the coin, there is a bold, pixelated dollar sign '$' extruded in 3D. The coin is slanted and has glowing neon green (#00FF66) and gold-yellow highlights. The background is a dark tech grid with diagonal neon cyan speedlines, creating a dynamic retro-future chiptune arcade vibe. Pixel art style, clean aliased edges, CRT scanlines, Sega Mega Drive game asset aesthetic, centered close-up icon.`
+Вместо наложения двух отдельных символов мы используем **единый гибридный символ**:
+* **Основа**: Современный, лаконичный знак доллара **($)** с чистыми, острыми контурами.
+* **Спираль**: Вертикальная палка знака доллара, проходящая по центру, продлевается вниз, выходит за границы знака и плавно закручивается вокруг всего доллара в круглую спираль (по принципу внешней петли символа **@**).
+* **Смысл**: Получается один цельный, аккуратный графический знак, который символизирует автоматизированный учет финансов и бота.
 
 ---
 
-## 3. Визуальный гайдлайн для интерфейсов (UI/UX)
+## 2. Стилистические правила (Мини-мудборд)
 
-Чтобы стиль ретро-киберпанка выглядел премиально в B2B SaaS продукте, необходимо строго дозировать декоративные элементы.
+Мы уходим от «дешевого» неонового свечения и 3D-эффектов в сторону дорогого графического минимализма:
+1. **Чистые контуры (Modern Contours)**: Контуры знака должны быть гладкими, векторными и четкими, без пиксельных ступенек (а-ля пиксель-арт). Это делает логотип современным.
+2. **Ретро-текстура внутри (Halftone & Dither)**: Внутреннее наполнение знака заливается текстурой полутонового растра (halftone dot pattern — как в старых комиксах или газетной печати) и ретро-смешиванием (dithering).
+3. **Плоский фон (Flat Grid)**:
+   - Цвет фона: Глубокий матовый черный/темно-серый.
+   - Детали фона: Едва заметные, очень тонкие серые линии плоской координатной сетки (без 3D-перспективы).
+   - Текстура фона: Мягкие, темные, приглушенные органические волны/дым зеленого цвета, которые создают глубину, но не перетягивают внимание с логотипа.
+4. **Отказ от лишнего**: Никаких рамок, металлических ободков и неонового свечения. Логотип должен выглядеть как качественная плоская печать (flat print).
 
-### А. Цветовая палитра (Color Palette)
+---
 
-* **Background (Основной)**: `#020804` (глубокий черный с зеленым оттенком) — снижает нагрузку на глаза.
-* **Surface (Панели, карточки)**: `#0A1C10` (темный лесной зеленый с прозрачностью) — создает эффект стекла.
-* **Primary (Текст, ключевые элементы)**: `#00FF66` (неоновый лайм) — привлекает внимание.
-* **Secondary (Акценты, ИИ)**: `#00F0FF` (кибер-бирюзовый) — для графиков и статусов.
-* **Danger/Alert**: `#FF2A6D` (неоновый розовый) — для критических уведомлений.
+## 3. Промпты для генерации (Midjourney / DALL-E 3)
 
-### Б. Шрифты (Typography)
+Ты можешь скопировать любой из этих промптов и использовать их в Midjourney или DALL-E 3 для самостоятельных тестов.
 
-1. **Заголовки и HUD (Аркадный стиль)**:
-   * **Шрифт**: **Press Start 2P** (Google Fonts).
-   * **Применение**: Только для логотипа, баланса (крупные цифры) и редких плашек-акцентов.
-2. **Данные и Цифры (Моноширинный стиль)**:
-   * **Шрифт**: **JetBrains Mono** или **Fira Code**.
-   * **Применение**: Списки транзакций, таблицы, аналитические графики (чтобы цифры не прыгали при обновлении).
-3. **Основной читаемый текст (Гротеск)**:
-   * **Шрифт**: **Inter** или **Plus Jakarta Sans**.
-   * **Применение**: Текст подсказок, меню настроек, документация (обеспечивает высокую скорость чтения, критичную для B2B).
+### Промпт 1 (Рекомендуется для DALL-E 3 — точная геометрия знака)
+> `A flat vector-style graphic of a unique financial logo on a dark background. The logo is a single solid symbol: a clean, modern dollar sign '$' with sharp, crisp edges. The vertical line of the dollar sign extends downwards, exiting the bottom of the sign and sweeping outwards to wrap around the entire dollar sign in a smooth circular spiral, mimicking the outer loop of the '@' at-sign. The symbol is colored in vibrant lime green, filled with a retro halftone dot pattern and checkerboard dithering texture inside. The background is a dark, almost black textured surface with subtle dark-green organic smoke waves and thin, faint, flat gray coordinate grid lines. No neon glow, flat print design, high contrast, centered composition.`
 
-### В. Ключевые приемы современного ретро-стиля (WOW-эффект):
-* **Стекломорфизм (Glassmorphism)**: Полупрозрачные карточки с размытием фона (`backdrop-filter: blur(12px)`) и тонкой неоновой обводкой в `1px` с прозрачностью 20%.
-* **Акцентные HUD-рамки**: Вместо сплошных обводок используйте только уголки рамок (Target Brackets) на важных блоках.
-* **Ретро-загрузчики**: Анимированные пиксельные прогресс-бары в стиле загрузки Sega-картриджей для ИИ-анализа.
+### Промпт 2 (Рекомендуется для Midjourney v6.0 — фокус на текстурах и палитре Sega)
+> `A graphic design of a modern financial logo. A clean, sharp-edged dollar sign ($) where the vertical line extends from the bottom and curves around to form the outer spiral loop of the '@' symbol. The logo has smooth, sharp vector contours with zero pixelation. Inside the logo, there is a dense retro halftone dot pattern and classic dither texture in neon lime green and forest green. The background is solid dark charcoal black with subtle organic dark green waves and very faint, thin gray coordinate grid lines. Flat print aesthetic, screen-print texture, minimalist, high contrast, centered, Sega-genesis inspired palette, --ar 1:1`
+
+### Промпт 3 (Минималистичный корпоративный техно-вариант)
+> `Minimalist corporate tech logo. A sharp, high-contrast flat graphic of a dollar sign ($) whose vertical bar extends downwards to wrap around the symbol in a perfect circular spiral like the '@' sign. Clean modern vector outlines. The interior of the glyph is textured with vintage printing halftone dots and 16-bit dithering using bright lime green and dark green. Background is black with a subtle organic dark-green smoke pattern and a thin, flat coordinate axis grid. Flat art style, Sega Genesis game intro screen vibe, print design, high-quality asset, centered --v 6.0`
