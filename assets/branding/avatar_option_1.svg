@@ -1,0 +1,141 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512" shape-rendering="crispEdges">
+  <defs>
+    <!-- Deep forest green to pitch black radial background -->
+    <radialGradient id="bg-glow" cx="50%" cy="45%" r="75%">
+      <stop offset="0%" stop-color="#051c0e" />
+      <stop offset="60%" stop-color="#010603" />
+      <stop offset="100%" stop-color="#000000" />
+    </radialGradient>
+
+    <!-- Scanline pattern for CRT texture -->
+    <pattern id="scanlines" width="4" height="4" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2" fill="#000000" fill-opacity="0.4" />
+    </pattern>
+
+    <!-- Dithering pattern (16-bit gradient illusion) -->
+    <pattern id="dither-pattern" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="4" height="4" fill="#00ff66" fill-opacity="0.15" />
+      <rect x="4" y="4" width="4" height="4" fill="#00ff66" fill-opacity="0.15" />
+    </pattern>
+
+    <!-- Retro Neon Glow -->
+    <filter id="neon-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="4" result="blur1" />
+      <feGaussianBlur in="SourceGraphic" stdDeviation="12" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#bg-glow)" />
+
+  <!-- Dithering Overlay for retro texture -->
+  <rect width="512" height="512" fill="url(#dither-pattern)" />
+
+  <!-- Cyber Grid (Perspective lines in Sega style) -->
+  <g stroke="#00ff66" stroke-width="2" opacity="0.25">
+    <!-- Horizon line -->
+    <line x1="0" y1="200" x2="512" y2="200" stroke-width="4" />
+    
+    <!-- Vanishing perspective lines (orthogonal) -->
+    <line x1="256" y1="200" x2="-100" y2="520" />
+    <line x1="256" y1="200" x2="20" y2="520" />
+    <line x1="256" y1="200" x2="120" y2="520" />
+    <line x1="256" y1="200" x2="200" y2="520" />
+    <line x1="256" y1="200" x2="256" y2="520" />
+    <line x1="256" y1="200" x2="312" y2="520" />
+    <line x1="256" y1="200" x2="392" y2="520" />
+    <line x1="256" y1="200" x2="492" y2="520" />
+    <line x1="256" y1="200" x2="612" y2="520" />
+
+    <!-- Transversal lines (getting closer and thicker) -->
+    <line x1="0" y1="210" x2="512" y2="210" stroke-width="1.0" />
+    <line x1="0" y1="225" x2="512" y2="225" stroke-width="1.2" />
+    <line x1="0" y1="245" x2="512" y2="245" stroke-width="1.5" />
+    <line x1="0" y1="275" x2="512" y2="275" stroke-width="1.8" />
+    <line x1="0" y1="315" x2="512" y2="315" stroke-width="2.2" />
+    <line x1="0" y1="370" x2="512" y2="370" stroke-width="2.8" />
+    <line x1="0" y1="440" x2="512" y2="440" stroke-width="3.5" />
+  </g>
+
+  <!-- Glowing Sun/Radars source in background (Retro Grid center) -->
+  <ellipse cx="256" cy="200" rx="60" ry="12" fill="#00ff66" opacity="0.15" filter="url(#neon-glow)" />
+
+  <!-- LOGO EMBLEM: Dynamic blocky $ + @ hybrid logo, slanted for speed -->
+  <g transform="translate(256, 230) rotate(-5) skewX(-12) translate(-256, -230)" filter="url(#neon-glow)">
+    
+    <!-- Outer Spiral of the '@' (16-bit bricky style) -->
+    <!-- We build the spiral out of thick block elements (thickness 24px) -->
+    
+    <!-- Outer top boundary -->
+    <rect x="136" y="112" width="240" height="24" fill="#00ff66" />
+    <!-- Outer left boundary -->
+    <rect x="112" y="136" width="24" height="240" fill="#00ff66" />
+    <!-- Outer bottom boundary -->
+    <rect x="136" y="376" width="264" height="24" fill="#00ff66" />
+    <!-- Outer right boundary -->
+    <rect x="400" y="208" width="24" height="168" fill="#00ff66" />
+    <!-- Outer spiral return corner -->
+    <rect x="376" y="184" width="48" height="24" fill="#00ff66" />
+    <rect x="376" y="136" width="24" height="48" fill="#00ff66" />
+
+    <!-- Connection from inner S to spiral -->
+    <!-- The spiral wraps and enters towards the center -->
+    <rect x="160" y="328" width="24" height="24" fill="#00ff66" />
+    <rect x="184" y="304" width="24" height="24" fill="#00ff66" />
+    
+    <!-- Inner '$' Symbol (S-shape + Vertical Bar) -->
+    <!-- S-shape blocks (thickness 24px) -->
+    <!-- Top bar -->
+    <rect x="208" y="176" width="96" height="24" fill="#00ff66" />
+    <!-- Top left vertical -->
+    <rect x="184" y="200" width="24" height="40" fill="#00ff66" />
+    <!-- Middle bar -->
+    <rect x="208" y="240" width="96" height="24" fill="#00ff66" />
+    <!-- Bottom right vertical -->
+    <rect x="304" y="264" width="24" height="40" fill="#00ff66" />
+    <!-- Bottom bar -->
+    <rect x="208" y="304" width="96" height="24" fill="#00ff66" />
+    
+    <!-- Vertical Dollar Line (Thick dashed retro line) -->
+    <rect x="244" y="144" width="24" height="32" fill="#00ff66" />
+    <rect x="244" y="200" width="24" height="104" fill="#00ff66" stroke="#051c0e" stroke-width="2" />
+    <rect x="244" y="328" width="24" height="32" fill="#00ff66" />
+    
+    <!-- Highlights in Sega Lime Green (Brighter neon accent) -->
+    <rect x="216" y="180" width="80" height="4" fill="#d4ff00" />
+    <rect x="188" y="204" width="4" height="32" fill="#d4ff00" />
+    <rect x="216" y="244" width="80" height="4" fill="#d4ff00" />
+    <rect x="308" y="268" width="4" height="32" fill="#d4ff00" />
+    <rect x="216" y="308" width="80" height="4" fill="#d4ff00" />
+    <!-- Outer spiral highlights -->
+    <rect x="144" y="116" width="224" height="4" fill="#d4ff00" />
+    <rect x="116" y="144" width="4" height="224" fill="#d4ff00" />
+  </g>
+
+  <!-- Retro interface corner frames (Sega arcade HUD feel) -->
+  <g stroke="#00ff66" stroke-width="2" opacity="0.6">
+    <!-- Top-left -->
+    <path d="M 20 40 L 20 20 L 40 20" fill="none" />
+    <!-- Top-right -->
+    <path d="M 472 20 L 492 20 L 492 40" fill="none" />
+    <!-- Bottom-left -->
+    <path d="M 20 472 L 20 492 L 40 492" fill="none" />
+    <!-- Bottom-right -->
+    <path d="M 472 492 L 492 492 L 492 472" fill="none" />
+  </g>
+
+  <!-- Text elements (HUD style) -->
+  <text x="50" y="35" font-family="'Courier New', monospace" font-size="14" font-weight="bold" fill="#00ff66" letter-spacing="2">SYS.ON: ACTIVE</text>
+  <text x="462" y="35" font-family="'Courier New', monospace" font-size="14" font-weight="bold" fill="#00ff66" text-anchor="end" letter-spacing="2">v1.0_16BIT</text>
+
+  <!-- Scanline CRT Overlay (placed last for realistic glass monitor look) -->
+  <rect width="512" height="512" fill="url(#scanlines)" pointer-events="none" />
+  
+  <!-- Subtle vignette / shadow around the borders -->
+  <rect width="512" height="512" fill="none" stroke="#000000" stroke-width="16" opacity="0.8" />
+</svg>

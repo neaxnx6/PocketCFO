@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient: Bright deep green to dark void -->
+    <linearGradient id="retro-bg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#021f0f" />
+      <stop offset="50%" stop-color="#000703" />
+      <stop offset="100%" stop-color="#000000" />
+    </linearGradient>
+
+    <!-- Bi-color gradient for 3D extrusion side walls -->
+    <linearGradient id="3d-side" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#005f2f" />
+      <stop offset="100%" stop-color="#001a0a" />
+    </linearGradient>
+
+    <!-- Chessboard Dithering Pattern (Classic Sega Mega Drive style) -->
+    <pattern id="sega-dither" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect x="0" y="0" width="4" height="4" fill="#00f0ff" fill-opacity="0.25" />
+      <rect x="4" y="4" width="4" height="4" fill="#00f0ff" fill-opacity="0.25" />
+    </pattern>
+
+    <!-- Neon Glow Filter -->
+    <filter id="arcade-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="4" result="blur1" />
+      <feGaussianBlur stdDeviation="10" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#retro-bg)" />
+
+  <!-- Dithering Grid Overlay -->
+  <rect width="512" height="512" fill="url(#sega-dither)" />
+
+  <!-- Dynamic Retro Speed Lines (Sega Arcade Background) -->
+  <g stroke="#00ff66" opacity="0.18" stroke-width="3">
+    <!-- Diagonal background stripes -->
+    <line x1="-100" y1="100" x2="600" y2="450" stroke-width="12" />
+    <line x1="-100" y1="200" x2="600" y2="550" stroke-width="24" />
+    <line x1="-100" y1="0" x2="600" y2="350" stroke-width="6" />
+    <line x1="-100" y1="300" x2="600" y2="650" stroke-width="8" />
+  </g>
+
+  <!-- Cyan/Teal accent rays (Sega 16-bit palette) -->
+  <g stroke="#00f0ff" opacity="0.15" stroke-width="2">
+    <line x1="-100" y1="150" x2="600" y2="500" stroke-width="4" stroke-dasharray="10 10" />
+    <line x1="-100" y1="250" x2="600" y2="600" stroke-width="6" stroke-dasharray="20 15" />
+  </g>
+
+  <!-- Giant Retro Sunset Grid Arc -->
+  <path d="M 106 380 A 180 180 0 0 1 406 380 Z" fill="none" stroke="#00ff66" stroke-width="3" opacity="0.3" filter="url(#arcade-glow)" />
+  <line x1="100" y1="380" x2="412" y2="380" stroke="#00ff66" stroke-width="4" opacity="0.4" />
+
+  <!-- 3D EXTRUDED LOGO EMBLEM -->
+  <!-- Slanted under 15 degrees for speed look -->
+  <g transform="translate(256, 250) rotate(-8) skewX(-10) translate(-256, -256)" filter="url(#arcade-glow)">
+    
+    <!-- 3D Extrusion Shadows (Layered offset for volume) -->
+    <g fill="none" stroke="url(#3d-side)" stroke-width="22" stroke-linecap="square" opacity="0.8">
+      <path d="M 230 330 C 185 330 150 295 150 250 C 150 205 185 170 230 170 C 275 170 310 205 310 250 L 310 280 C 310 292 300 300 288 300 C 276 300 268 292 268 280 L 268 236 C 268 215 250 200 230 200 C 210 200 194 215 194 236 L 194 264 C 194 285 210 300 230 300 C 242 300 252 292 258 282" transform="translate(-16, 16)" />
+      <path d="M 230 330 C 185 330 150 295 150 250 C 150 205 185 170 230 170 C 275 170 310 205 310 250 L 310 280 C 310 292 300 300 288 300 C 276 300 268 292 268 280 L 268 236 C 268 215 250 200 230 200 C 210 200 194 215 194 236 L 194 264 C 194 285 210 300 230 300 C 242 300 252 292 258 282" transform="translate(-12, 12)" />
+      <path d="M 230 330 C 185 330 150 295 150 250 C 150 205 185 170 230 170 C 275 170 310 205 310 250 L 310 280 C 310 292 300 300 288 300 C 276 300 268 292 268 280 L 268 236 C 268 215 250 200 230 200 C 210 200 194 215 194 236 L 194 264 C 194 285 210 300 230 300 C 242 300 252 292 258 282" transform="translate(-8, 8)" />
+      <path d="M 230 330 C 185 330 150 295 150 250 C 150 205 185 170 230 170 C 275 170 310 205 310 250 L 310 280 C 310 292 300 300 288 300 C 276 300 268 292 268 280 L 268 236 C 268 215 250 200 230 200 C 210 200 194 215 194 236 L 194 264 C 194 285 210 300 230 300 C 242 300 252 292 258 282" transform="translate(-4, 4)" />
+    </g>
+
+    <!-- Dollar Sign Vertical Lines extrusion shadow -->
+    <rect x="225" y="140" width="12" height="232" fill="#001a0a" transform="translate(-12, 12)" />
+    <rect x="225" y="140" width="12" height="232" fill="#001a0a" transform="translate(-6, 6)" />
+
+    <!-- Main Front Face (Bright Neon Lime Green + Cyan Stroke) -->
+    <g fill="none" stroke="#00ff66" stroke-width="22" stroke-linecap="square">
+      <!-- Spiral Main Body -->
+      <path d="M 230 330 C 185 330 150 295 150 250 C 150 205 185 170 230 170 C 275 170 310 205 310 250 L 310 280 C 310 292 300 300 288 300 C 276 300 268 292 268 280 L 268 236 C 268 215 250 200 230 200 C 210 200 194 215 194 236 L 194 264 C 194 285 210 300 230 300 C 242 300 252 292 258 282" />
+    </g>
+
+    <!-- Dollar central vertical bar front face -->
+    <rect x="225" y="140" width="12" height="232" fill="#d4ff00" stroke="#00ff66" stroke-width="2" />
+
+    <!-- Cyan Inner Highlights (Sega arcade neon accent lines) -->
+    <g fill="none" stroke="#00f0ff" stroke-width="6" stroke-linecap="square">
+      <path d="M 230 324 C 189 324 156 291 156 250 C 156 209 189 176 230 176 C 271 176 304 209 304 250 L 304 280 C 304 289 297 294 288 294 C 279 294 274 289 274 280 L 274 236 C 274 211 254 194 230 194 C 206 194 188 211 188 236 L 188 264 C 188 289 206 294 230 294 C 238 294 246 290 250 282" />
+    </g>
+    
+    <!-- White center core line for ultimate glossy shine -->
+    <g fill="none" stroke="#ffffff" stroke-width="2" stroke-linecap="round" opacity="0.9">
+      <path d="M 230 321 C 192 321 161 290 161 250 C 161 210 192 179 230 179 C 268 179 299 210 299 250" />
+      <line x1="231" y1="145" x2="231" y2="365" />
+    </g>
+  </g>
+
+  <!-- Sega Genesis style black grid header/footer banners -->
+  <g fill="#000000">
+    <rect x="0" y="0" width="512" height="24" />
+    <rect x="0" y="488" width="512" height="24" />
+  </g>
+
+  <g font-family="'Courier New', monospace" font-size="10" font-weight="bold">
+    <text x="256" y="16" fill="#00f0ff" text-anchor="middle" letter-spacing="4">SEGA 16-BIT COMPATIBLE</text>
+    <text x="256" y="504" fill="#00ff66" text-anchor="middle" letter-spacing="3">16-BIT AI FINANCIAL ASSISTANT</text>
+  </g>
+
+  <!-- Decorative technical marks -->
+  <g stroke="#00f0ff" stroke-width="1" opacity="0.6">
+    <line x1="20" y1="12" x2="40" y2="12" />
+    <line x1="472" y1="12" x2="492" y2="12" />
+    <line x1="20" y1="500" x2="40" y2="500" />
+    <line x1="472" y1="500" x2="492" y2="500" />
+  </g>
+  
+  <!-- Subtle CRT Vignette / Glass screen reflection -->
+  <path d="M 0 0 L 512 0 L 512 512 Z" fill="#ffffff" fill-opacity="0.015" pointer-events="none" />
+  <circle cx="256" cy="256" r="360" fill="none" stroke="#000000" stroke-width="120" opacity="0.45" pointer-events="none" />
+</svg>

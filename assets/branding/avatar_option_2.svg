@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <!-- Background Gradient: Green core to dark borders -->
+    <radialGradient id="matrix-bg" cx="50%" cy="50%" r="75%">
+      <stop offset="0%" stop-color="#021609" />
+      <stop offset="70%" stop-color="#000502" />
+      <stop offset="100%" stop-color="#000000" />
+    </radialGradient>
+
+    <!-- Halftone Dot Pattern for Mask -->
+    <pattern id="halftone-dots" width="8" height="8" patternUnits="userSpaceOnUse">
+      <circle cx="4" cy="4" r="2.5" fill="#ffffff" />
+    </pattern>
+
+    <!-- Halftone Mask applied to the logo -->
+    <mask id="halftone-mask">
+      <!-- Everything white passes, black blocks -->
+      <rect width="512" height="512" fill="#000000" />
+      <!-- The mask uses the dot pattern but only where the logo is -->
+      <rect width="512" height="512" fill="url(#halftone-dots)" />
+    </mask>
+
+    <!-- Scanline overlay -->
+    <pattern id="crt-lines" width="4" height="6" patternUnits="userSpaceOnUse">
+      <rect width="4" height="2" fill="#000000" fill-opacity="0.5" />
+    </pattern>
+
+    <!-- Glow Filter -->
+    <filter id="cyber-glow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="3" result="blur1" />
+      <feGaussianBlur stdDeviation="9" opacity="0.5" result="blur2" />
+      <feMerge>
+        <feMergeNode in="blur2" />
+        <feMergeNode in="blur1" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+
+    <!-- Glitch / Shift Filter -->
+    <filter id="glitch-split">
+      <feOffset dx="-3" dy="0" in="SourceGraphic" result="red-shift" />
+      <feOffset dx="3" dy="0" in="SourceGraphic" result="green-shift" />
+      <feMerge>
+        <feMergeNode in="red-shift" />
+        <feMergeNode in="green-shift" stroke="#00ff66" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="512" height="512" fill="url(#matrix-bg)" />
+
+  <!-- Cyber Dot Matrix Grid Background -->
+  <g opacity="0.12">
+    <pattern id="dot-grid" width="16" height="16" patternUnits="userSpaceOnUse">
+      <circle cx="8" cy="8" r="1.5" fill="#00ff66" />
+    </pattern>
+    <rect width="512" height="512" fill="url(#dot-grid)" />
+  </g>
+
+  <!-- Circular Radar/Financial Chart HUD background -->
+  <g stroke="#00ff66" stroke-width="1.5" fill="none" opacity="0.25" filter="url(#cyber-glow)">
+    <circle cx="256" cy="256" r="170" stroke-dasharray="8 6" />
+    <circle cx="256" cy="256" r="190" stroke-width="0.5" />
+    <circle cx="256" cy="256" r="210" stroke-dasharray="40 180 80 40" stroke-width="2" />
+  </g>
+
+  <!-- Retro Financial Line Graph (Sega Arcade HUD Style) -->
+  <path d="M 90 400 L 150 380 L 210 410 L 270 350 L 330 370 L 390 320 L 430 340" 
+        fill="none" stroke="#00ff66" stroke-width="3" opacity="0.3" stroke-dasharray="none" />
+  <path d="M 90 400 L 150 380 L 210 410 L 270 350 L 330 370 L 390 320 L 430 340 L 430 430 L 90 430 Z" 
+        fill="url(#matrix-bg)" opacity="0.2" />
+  
+  <!-- Target Box Brackets around logo -->
+  <g stroke="#00ff66" stroke-width="2" fill="none" opacity="0.7">
+    <!-- Top-left target bracket -->
+    <path d="M 120 160 L 120 120 L 160 120" />
+    <!-- Bottom-right target bracket -->
+    <path d="M 392 352 L 392 392 L 352 392" />
+  </g>
+
+  <!-- LOGO EMBLEM: Glitched $ + @ with Halftone Mask -->
+  <g transform="translate(256, 256) rotate(6) skewX(-6) translate(-256, -256)" filter="url(#cyber-glow)">
+    
+    <!-- Shadow/Green Glitch Offset (Dithering visual back layer) -->
+    <g opacity="0.45" fill="#007733" transform="translate(-4, 3)">
+      <!-- Outer Spiral -->
+      <path d="M 230 340 C 180 340 140 300 140 250 C 140 200 180 160 230 160 C 280 160 320 200 320 250 L 320 280 C 320 295 310 305 295 305 C 280 305 270 295 270 280 L 270 230 C 270 210 255 195 235 195 C 215 195 200 210 200 230 L 200 270 C 200 290 215 305 235 305 C 248 305 258 298 264 288 L 264 280" stroke="#007733" stroke-width="24" fill="none" stroke-linecap="square" />
+      <!-- Dollar lines -->
+      <rect x="223" y="125" width="24" height="250" />
+    </g>
+
+    <!-- Main Logo with Halftone Mask (Gives Sega Retro Print vibe) -->
+    <!-- The mask renders the content inside using retro halftone dots -->
+    <g mask="url(#halftone-mask)">
+      <!-- Fill Solid Neon Green -->
+      <rect x="80" y="80" width="352" height="352" fill="#00ff66" />
+      <!-- Add bright lime neon details inside the shape -->
+      <g fill="#d4ff00">
+        <!-- Outer Spiral details -->
+        <path d="M 230 340 C 180 340 140 300 140 250 C 140 200 180 160 230 160 C 280 160 320 200 320 250 L 320 280 C 320 295 310 305 295 305 C 280 305 270 295 270 280 L 270 230 C 270 210 255 195 235 195 C 215 195 200 210 200 230 L 200 270 C 200 290 215 305 235 305 C 248 305 258 298 264 288 L 264 280" stroke="#d4ff00" stroke-width="12" fill="none" stroke-linecap="square" />
+        <rect x="229" y="125" width="12" height="250" />
+      </g>
+    </g>
+
+    <!-- Redrawn sharp vectors on top to keep some lines crisp -->
+    <g fill="none" stroke="#00ff66" stroke-width="8" opacity="0.9" stroke-linecap="square">
+      <!-- S-curve inside the spiral (Dollar + At core) -->
+      <path d="M 260 215 L 225 215 C 215 215 210 220 210 230 C 210 240 215 245 225 245 L 245 245 C 255 245 260 250 260 260 C 260 270 255 275 245 275 L 210 275" />
+      <!-- Outer spiral thin trace -->
+      <path d="M 148 240 C 148 195 185 168 230 168 C 275 168 312 195 312 240 L 312 280 C 312 290 305 297 296 297 C 287 297 280 290 280 280 L 280 236 C 280 215 260 202 236 202 C 212 202 192 215 192 236 L 192 268 C 192 289 212 302 236 302 C 248 302 258 295 264 286" />
+      <!-- Dollar sign vertical bar stroke -->
+      <line x1="236" y1="135" x2="236" y2="365" stroke-width="6" stroke="#00ff66" />
+    </g>
+  </g>
+
+  <!-- Cyber Terminal Status Text (HUD Style) -->
+  <g font-family="'Courier New', monospace" font-size="12" font-weight="bold" fill="#00ff66" opacity="0.85">
+    <text x="35" y="445">> BAL.SYS: ONLINE</text>
+    <text x="35" y="465">> NET: CONNECTED [TGBOT]</text>
+    <text x="35" y="485">> CRITICAL_METRIC: STABLE</text>
+    
+    <!-- Graph labels -->
+    <text x="475" y="445" text-anchor="end">ROI: +42.8%</text>
+    <text x="475" y="465" text-anchor="end">AI_MOD: ACTIVE</text>
+    <text x="475" y="485" text-anchor="end">SYS_SEC: 99.9%</text>
+  </g>
+
+  <!-- CRT Scanlines overlay -->
+  <rect width="512" height="512" fill="url(#crt-lines)" pointer-events="none" />
+
+  <!-- Hard border vignette -->
+  <rect width="512" height="512" fill="none" stroke="#000000" stroke-width="12" opacity="0.95" />
+</svg>
