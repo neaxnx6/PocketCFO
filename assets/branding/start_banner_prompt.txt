@@ -1,0 +1,20 @@
+# Промпты для генерации стартового баннера бота «На Балансе»
+
+Этот баннер предназначен для установки в приветственном описании бота (то, что видит пользователь перед тем, как нажать кнопку «Запустить»). 
+Вы можете сгенерировать его в Nano Banana 2, Midjourney v6.0 или DALL-E 3.
+
+---
+
+## Вариант 1: Заставка ретро-игры (Рекомендуется)
+Этот промпт создаёт заставку в стиле главного меню игры Mega Drive / Sega Genesis с надписью «НА БАЛАНСЕ» и фирменным гибридным логотипом.
+
+> **Prompt:**
+> A 16-bit Sega Genesis opening screen style illustration. In the center, there is a bold, stylized, blocky title text that says "НА БАЛАНСЕ" in capitalized Cyrillic letters with a bright lime-green gradient and thick dark borders, styled like a 90s arcade game title. Behind the title, there is the unique financial logo: a sleek modern dollar sign '$' whose bottom line wraps around the entire symbol in a smooth circular loop like the '@' symbol. The logo and title are set against a dark textured screen print background with subtle horizontal lines, thin gray coordinate grids, and faint dark green organic wave patterns. In the lower part of the screen, the pixelated text "PRESS START TO PLAY" or "INSERT COIN" is faintly visible. Retro game UI, neon lime green and forest green color scheme, flat print style with halftone dot shading and dithering, high contrast, centered composition.
+
+---
+
+## Вариант 2: Минималистичный постер (Для DALL-E 3)
+Более чистая, современная интерпретация с акцентом на геометрию и плоскую текстуру.
+
+> **Prompt:**
+> A flat design vector-style financial game start screen. The title text "НА БАЛАНСЕ" in clean, bold, futuristic Cyrillic letters is positioned at the top in neon lime green. Underneath it, there is a large, high-contrast hybrid symbol combining a modern sharp dollar sign '$' with a wrapping circular '@' spiral loop. The color palette is strictly lime green, deep forest green, and solid black. The background has thin coordinate grid lines and retro half-tone dot textures (halftone print pattern). Modern retro game visual, arcade cabinet screen aesthetic, premium print design, centered, high contrast.
