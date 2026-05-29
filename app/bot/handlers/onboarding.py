@@ -71,7 +71,7 @@ async def cmd_start(message: Message):
             await session.commit()
             
             welcome_text = (
-                "👋 Привет! Я «На Балансе» — твой ИИ-финдиректор.\n\n"
+                "👋 Привет! Я «На Балансе» — твой ИИ-помощник по финансам.\n\n"
                 "<b>Как работаем:</b>\n\n"
                 "🎤 Запиши голосовое или напиши текстом: сколько зарабатываешь, какие есть обязательные платежи, долги и на что копишь. Я составлю финансовый план и создам фонды.\n\n"
                 "<i>Или просто начни писать расходы — разберёмся по ходу.</i>"
@@ -79,10 +79,34 @@ async def cmd_start(message: Message):
         else:
             welcome_text = "С возвращением! Я помню все твои цели. Жду расходы, доходы или вопросы! (Если хочешь начать жизнь с чистого листа, нажми /reset)"
             
-    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+    from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
     persistent_keyboard = ReplyKeyboardMarkup(
         keyboard=[[KeyboardButton(text="📊 Мой бюджет")]],
         resize_keyboard=True,
         is_persistent=True
     )
+    
+    import os
+    # Root of the project
+    root_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+    banner_path = None
+    for ext in [".png", ".jpg", ".jpeg"]:
+        test_path = os.path.join(root_dir, "assets", "branding", f"start_banner{ext}")
+        if os.path.exists(test_path):
+            banner_path = test_path
+            break
+            
+    if banner_path:
+        try:
+            await message.answer_photo(
+                photo=FSInputFile(banner_path),
+                caption=welcome_text,
+                parse_mode="HTML",
+                reply_markup=persistent_keyboard
+            )
+            return
+        except Exception as e:
+            # Fallback to text in case of TG sending error
+            pass
+            
     await message.answer(welcome_text, parse_mode="HTML", reply_markup=persistent_keyboard)

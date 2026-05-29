@@ -1,20 +1,21 @@
-# Промпты для генерации стартового баннера бота «На Балансе»
+# Рекомендованные промпты для генерации стартового баннера «На Балансе»
 
-Этот баннер предназначен для установки в приветственном описании бота (то, что видит пользователь перед тем, как нажать кнопку «Запустить»). 
-Вы можете сгенерировать его в Nano Banana 2, Midjourney v6.0 или DALL-E 3.
+Чтобы Nano Banana 2 точно передала стиль вашей новой аватарки, **обязательно прикрепите изображение аватарки (или ссылку на неё) как Image-to-Image референс / URL**.
 
----
-
-## Вариант 1: Заставка ретро-игры (Рекомендуется)
-Этот промпт создаёт заставку в стиле главного меню игры Mega Drive / Sega Genesis с надписью «НА БАЛАНСЕ» и фирменным гибридным логотипом.
-
-> **Prompt:**
-> A 16-bit Sega Genesis opening screen style illustration. In the center, there is a bold, stylized, blocky title text that says "НА БАЛАНСЕ" in capitalized Cyrillic letters with a bright lime-green gradient and thick dark borders, styled like a 90s arcade game title. Behind the title, there is the unique financial logo: a sleek modern dollar sign '$' whose bottom line wraps around the entire symbol in a smooth circular loop like the '@' symbol. The logo and title are set against a dark textured screen print background with subtle horizontal lines, thin gray coordinate grids, and faint dark green organic wave patterns. In the lower part of the screen, the pixelated text "PRESS START TO PLAY" or "INSERT COIN" is faintly visible. Retro game UI, neon lime green and forest green color scheme, flat print style with halftone dot shading and dithering, high contrast, centered composition.
+Мы убрали фейковые консольные надписи («Sega Genesis», года копирайтов), заменили английский текст на русский и приглушили цвета, сделав их более премиальными (темно-серый матовый фон, изумрудно-зеленый и мятно-зеленый тона).
 
 ---
 
-## Вариант 2: Минималистичный постер (Для DALL-E 3)
-Более чистая, современная интерпретация с акцентом на геометрию и плоскую текстуру.
+## Вариант 1: Сбалансированный плоский постер (Рекомендуется)
+Этот вариант выглядит современно, премиально и содержит надпись-подсказку на русском языке.
 
 > **Prompt:**
-> A flat design vector-style financial game start screen. The title text "НА БАЛАНСЕ" in clean, bold, futuristic Cyrillic letters is positioned at the top in neon lime green. Underneath it, there is a large, high-contrast hybrid symbol combining a modern sharp dollar sign '$' with a wrapping circular '@' spiral loop. The color palette is strictly lime green, deep forest green, and solid black. The background has thin coordinate grid lines and retro half-tone dot textures (halftone print pattern). Modern retro game visual, arcade cabinet screen aesthetic, premium print design, centered, high contrast.
+> A flat graphic design vector poster for a finance startup. In the center, there is a large, clean, modern dollar sign '$' whose bottom line wraps around the entire glyph in a perfect circular loop to form a hybrid with the '@' symbol. Overlaid on the lower part of the logo is the title text "НА БАЛАНСЕ" in bold, sharp Cyrillic letters, colored in premium mint green with a dark outline. Beneath the title, in a smaller clean pixelated font, is the Russian subtitle "ИИ-ПОМОЩНИК ПО ФИНАНСАМ". Color palette is deep matte charcoal gray, rich forest green, and vibrant mint. Background is flat with a very faint, thin gray coordinate grid and a subtle organic halftone dot pattern for texture, with zero neon glow or cheap 3D reflections. High contrast, clean outlines, premium look, centered composition.
+
+---
+
+## Вариант 2: Заставка в стиле ретро-меню (Русская версия)
+Подходит для любителей аутентичной игровой эстетики, но без лишних упоминаний Sega и английского языка.
+
+> **Prompt:**
+> A 16-bit arcade opening menu screen. The main title is "НА БАЛАНСЕ" in large, blocky Cyrillic gaming font with a green-to-mint gradient and solid black drop shadows. Behind the title, a flat modern dollar sign combined with an '@' outer loop spiral is displayed in forest green. In the lower section, instead of English text, there is a pixelated Russian instruction: "НАЖМИ /START ЧТОБЫ НАЧАТЬ". The background is dark charcoal grey with thin grid lines and vintage printing halftone dot patterns. Strictly no English console names, no fake copyrights, no neon bloom. Flat print retro aesthetic, high contrast, centered.
