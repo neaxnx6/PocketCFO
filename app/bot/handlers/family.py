@@ -24,7 +24,7 @@ def generate_invite_code() -> str:
     digits = ''.join(random.choices(string.digits, k=6))
     return f"CF-{digits}"
 
-async def get_user_family_status(user: User, session) -> tuple[str, Optional[InlineKeyboardMarkup]]:
+async def get_user_family_status(user: User, session, show_back_button: bool = False) -> tuple[str, Optional[InlineKeyboardMarkup]]:
     """Helper to format the family status message and build markup."""
     if user.family_host_id:
         # User is a member
@@ -37,9 +37,12 @@ async def get_user_family_status(user: User, session) -> tuple[str, Optional[Inl
                 f"👤 <b>Партнёр (Владелец бюджета):</b> ID <code>{host.telegram_id}</code>\n"
                 "💡 Вы используете общие конверты и общие настройки дохода владельца."
             )
-            markup = InlineKeyboardMarkup(inline_keyboard=[
+            buttons = [
                 [InlineKeyboardButton(text="🚪 Выйти из семейного бюджета", callback_data="family_leave")]
-            ])
+            ]
+            if show_back_button:
+                buttons.append([InlineKeyboardButton(text="⬅️ Назад к бюджету", callback_data="show_envelopes")])
+            markup = InlineKeyboardMarkup(inline_keyboard=buttons)
             return text, markup
         else:
             # Host not found, reset
@@ -57,9 +60,12 @@ async def get_user_family_status(user: User, session) -> tuple[str, Optional[Inl
             f"👥 <b>Подключенные партнёры:</b> {member_ids}\n"
             "💡 Все транзакции партнёров списываются из твоих конвертов."
         )
-        markup = InlineKeyboardMarkup(inline_keyboard=[
+        buttons = [
             [InlineKeyboardButton(text="🚪 Распустить семейную группу", callback_data="family_leave")]
-        ])
+        ]
+        if show_back_button:
+            buttons.append([InlineKeyboardButton(text="⬅️ Назад к бюджету", callback_data="show_envelopes")])
+        markup = InlineKeyboardMarkup(inline_keyboard=buttons)
         return text, markup
 
     # Solo mode
@@ -81,8 +87,19 @@ async def get_user_family_status(user: User, session) -> tuple[str, Optional[Inl
         buttons.append([InlineKeyboardButton(text="🔄 Сбросить код", callback_data="family_gen_code")])
         
     buttons.append([InlineKeyboardButton(text="📥 Ввести код партнёра", callback_data="family_enter_code")])
+    if show_back_button:
+        buttons.append([InlineKeyboardButton(text="⬅️ Назад к бюджету", callback_data="show_envelopes")])
     markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     return text, markup
+
+
+def _should_show_back(callback: CallbackQuery) -> bool:
+    if callback.message and callback.message.reply_markup and callback.message.reply_markup.inline_keyboard:
+        for row in callback.message.reply_markup.inline_keyboard:
+            for btn in row:
+                if btn.callback_data == "show_envelopes":
+                    return True
+    return False
 
 
 @router.message(Command("family"))
@@ -96,6 +113,20 @@ async def cmd_family(message: Message):
             
         text, markup = await get_user_family_status(user, session)
         await message.answer(text, parse_mode="HTML", reply_markup=markup)
+
+
+@router.callback_query(F.data == "family_menu")
+async def family_menu_callback(callback: CallbackQuery):
+    async with async_session_maker() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            await callback.answer("Сначала нажми /start")
+            return
+            
+        text, markup = await get_user_family_status(user, session, show_back_button=True)
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
+        await callback.answer()
 
 
 @router.callback_query(F.data == "family_gen_code")
@@ -116,7 +147,8 @@ async def family_gen_code(callback: CallbackQuery):
                 break
         
         await session.commit()
-        text, markup = await get_user_family_status(user, session)
+        show_back = _should_show_back(callback)
+        text, markup = await get_user_family_status(user, session, show_back_button=show_back)
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
         await callback.answer("Код подключения сгенерирован!")
 
@@ -124,9 +156,11 @@ async def family_gen_code(callback: CallbackQuery):
 @router.callback_query(F.data == "family_enter_code")
 async def family_enter_code(callback: CallbackQuery, state: FSMContext):
     await state.set_state(FamilyStates.entering_code)
-    cancel_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Отмена", callback_data="family_cancel")]
-    ])
+    show_back = _should_show_back(callback)
+    buttons = [[InlineKeyboardButton(text="❌ Отмена", callback_data="family_cancel")]]
+    if show_back:
+        buttons.append([InlineKeyboardButton(text="⬅️ Назад к бюджету", callback_data="show_envelopes")])
+    cancel_markup = InlineKeyboardMarkup(inline_keyboard=buttons)
     await callback.message.edit_text(
         "📥 <b>Введи код партнёра</b>\n\n"
         "Отправь мне код партнёра в формате <code>CF-123456</code>:",
@@ -142,7 +176,8 @@ async def family_cancel(callback: CallbackQuery, state: FSMContext):
     async with async_session_maker() as session:
         user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
         user = user_result.scalar_one_or_none()
-        text, markup = await get_user_family_status(user, session)
+        show_back = _should_show_back(callback)
+        text, markup = await get_user_family_status(user, session, show_back_button=show_back)
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
         await callback.answer("Ввод отменен")
 
@@ -252,6 +287,7 @@ async def family_leave(callback: CallbackQuery, bot: Bot):
             except Exception as e:
                 logger.warning(f"Could not notify partner {partner_id}: {e}")
 
-        text, markup = await get_user_family_status(user, session)
+        show_back = _should_show_back(callback)
+        text, markup = await get_user_family_status(user, session, show_back_button=show_back)
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=markup)
         await callback.answer("Вы успешно вышли из семейного режима")

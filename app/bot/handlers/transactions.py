@@ -387,7 +387,10 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 dashboard = build_dashboard(envelopes, monthly_income=budget_owner.monthly_income or 0)
                 session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=dashboard))
                 await session.commit()
-                await message.answer(dashboard, parse_mode="HTML")
+                reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="👥 Семейный бюджет", callback_data="family_menu")]
+                ])
+                await message.answer(dashboard, parse_mode="HTML", reply_markup=reply_markup)
                 return
 
             loading_msgs = []
@@ -795,6 +798,10 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 [InlineKeyboardButton(text="✅ Подтверждаю", callback_data="confirm_income")],
                 [InlineKeyboardButton(text="❌ Оставить в Нераспределённых", callback_data="reject_income")]
             ])
+        elif force_dashboard:
+            reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+                [InlineKeyboardButton(text="👥 Семейный бюджет", callback_data="family_menu")]
+            ])
         elif show_envelopes_button:
             reply_markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="📊 Показать мой бюджет", callback_data="show_envelopes")]
@@ -941,10 +948,13 @@ async def show_envelopes_callback(callback):
         return
 
     dashboard = build_dashboard(envelopes, monthly_income=monthly_income)
+    reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👥 Семейный бюджет", callback_data="family_menu")]
+    ])
     try:
-        await callback.message.edit_text(dashboard, parse_mode="HTML")
+        await callback.message.edit_text(dashboard, parse_mode="HTML", reply_markup=reply_markup)
     except Exception:
-        await callback.message.answer(dashboard, parse_mode="HTML")
+        await callback.message.answer(dashboard, parse_mode="HTML", reply_markup=reply_markup)
 
 
 @router.message(F.text & ~F.text.startswith('/'))
