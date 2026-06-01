@@ -120,7 +120,10 @@ def build_financial_health(envelopes: list[Envelope], monthly_income: float = 0.
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
     expense_envs = [e for e in envelopes if not getattr(e, 'is_debt', False) and not getattr(e, 'is_goal', False)]
     total_debt = sum((e.target_amount or 0) - e.current_amount for e in debt_envs)
-    monthly_expenses = sum(e.target_amount or 0 for e in expense_envs if (e.target_amount or 0) > 0)
+    monthly_expenses = (
+        sum(e.target_amount or 0 for e in expense_envs if (e.target_amount or 0) > 0)
+        + sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
+    )
 
     lines = []
     free_cash = None
@@ -155,7 +158,10 @@ def get_health_status(envelopes: list) -> str:
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
     expense_envs = [e for e in envelopes if not getattr(e, 'is_debt', False) and not getattr(e, 'is_goal', False)]
     total_debt = sum((e.target_amount or 0) - e.current_amount for e in debt_envs)
-    monthly_expenses = sum(e.target_amount or 0 for e in expense_envs if (e.target_amount or 0) > 0)
+    monthly_expenses = (
+        sum(e.target_amount or 0 for e in expense_envs if (e.target_amount or 0) > 0)
+        + sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
+    )
     
     free_cash_env = _find_unallocated(envelopes)
     free_cash = free_cash_env.current_amount if free_cash_env else 0
@@ -181,14 +187,17 @@ def calculate_forecasts(envelopes: list, monthly_income: float) -> dict:
         and "буфер" not in e.name.lower()
         and e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")
     ]
-    monthly_expenses = sum(e.target_amount or 0 for e in expense_envs if (e.target_amount or 0) > 0)
+    debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
+    monthly_expenses = (
+        sum(e.target_amount or 0 for e in expense_envs if (e.target_amount or 0) > 0)
+        + sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
+    )
     free_cash = monthly_income - monthly_expenses
     
     if free_cash <= 0:
         return {"status": "negative_or_zero", "free_cash": free_cash}
 
     # 2. Активные долги (сортировка: сначала меньшие остатки - Snowball)
-    debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
     active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
     active_debts.sort(key=lambda x: (x.target_amount or 0) - x.current_amount)
 
@@ -298,8 +307,8 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
     expense_lines = []
     goal_lines = []
     debt_lines = []
-    buffer_lines = []
     unallocated_amount = 0.0
+    buffer_env = None
 
     for e in envelopes:
         if e.name.lower().strip() in ("нераспределённые", "кошелек", "кошелёк"):
@@ -307,17 +316,20 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
             continue
             
         if "буфер" in e.name.lower():
-            buffer_lines.append(f"• {fmt_money(e.current_amount)}")
-        elif getattr(e, 'is_debt', False):
+            buffer_env = e
+            continue
+            
+        if getattr(e, 'is_debt', False):
             rem = (e.target_amount or 0) - e.current_amount
             if rem > 0:
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
-                debt_lines.append(f"• {e.name}: {fmt_money(rem)} (погашено {pct}%)")
+                min_pay_str = fmt_money(e.min_payment or 0)
+                debt_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}, мин. платёж {min_pay_str}, погашено {pct}%)")
         elif getattr(e, 'is_goal', False):
-            target_str = f" из {fmt_money(e.target_amount or 0)}" if (e.target_amount or 0) > 0 else ""
-            goal_lines.append(f"• {e.name}: {fmt_money(e.current_amount)}{target_str}")
+            target_str = f" (цель {fmt_money(e.target_amount or 0)})" if (e.target_amount or 0) > 0 else ""
+            goal_lines.append(f"• {e.name}: накоплено {fmt_money(e.current_amount)}{target_str}")
         else:
-            expense_lines.append(f"• {e.name}: {fmt_money(e.current_amount)} из {fmt_money(e.target_amount or 0)}")
+            expense_lines.append(f"• {e.name}: осталось {fmt_money(e.current_amount)} (лимит {fmt_money(e.target_amount or 0)})")
 
     parts = ["📊 <b>Финансовый навигатор</b>\n"]
     
@@ -328,8 +340,12 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
 
     if expense_lines:
         parts.append("🛍 <b>На расходы:</b>\n" + "\n".join(expense_lines))
-    if buffer_lines:
-        parts.append("\n🛡 <b>Буфер:</b>\n" + "\n".join(buffer_lines))
+    
+    if buffer_env:
+        parts.append(f"\n🛡 <b>Буфер:</b> {fmt_money(buffer_env.current_amount)}")
+    else:
+        parts.append("\n🛡 <b>Буфер:</b> 0")
+        
     if goal_lines:
         parts.append("\n🎯 <b>Цели:</b>\n" + "\n".join(goal_lines))
     if debt_lines:

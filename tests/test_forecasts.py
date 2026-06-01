@@ -1,12 +1,13 @@
 from app.bot.handlers.transactions import calculate_forecasts, fmt_months_ru
 
 class MockEnvelope:
-    def __init__(self, name: str, current_amount: float, target_amount: float, is_debt: bool = False, is_goal: bool = False):
+    def __init__(self, name: str, current_amount: float, target_amount: float, is_debt: bool = False, is_goal: bool = False, min_payment: float = 0.0):
         self.name = name
         self.current_amount = current_amount
         self.target_amount = target_amount
         self.is_debt = is_debt
         self.is_goal = is_goal
+        self.min_payment = min_payment
 
 def test_calculate_forecasts_ok():
     # Envelopes setup:

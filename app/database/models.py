@@ -35,6 +35,7 @@ class Envelope(Base):
     current_amount: Mapped[float] = mapped_column(Float, default=0.0)
     is_debt: Mapped[bool] = mapped_column(Boolean, default=False)
     is_goal: Mapped[bool] = mapped_column(Boolean, default=False)
+    min_payment: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     priority: Mapped[int] = mapped_column(default=1)
 
     user = relationship("User", back_populates="envelopes")
