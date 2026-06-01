@@ -323,13 +323,13 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
             rem = (e.target_amount or 0) - e.current_amount
             if rem > 0:
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
-                min_pay_str = fmt_money(e.min_payment or 0)
-                debt_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}, мин. платёж {min_pay_str}, погашено {pct}%)")
+                min_pay_str = f", мин. платёж {fmt_money(e.min_payment)}" if (e.min_payment or 0) > 0 else ""
+                debt_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}{min_pay_str}, погашено {pct}%)")
         elif getattr(e, 'is_goal', False):
             target_str = f" (цель {fmt_money(e.target_amount or 0)})" if (e.target_amount or 0) > 0 else ""
             goal_lines.append(f"• {e.name}: накоплено {fmt_money(e.current_amount)}{target_str}")
         else:
-            expense_lines.append(f"• {e.name}: осталось {fmt_money(e.current_amount)} (лимит {fmt_money(e.target_amount or 0)})")
+            expense_lines.append(f"• {e.name}: доступно {fmt_money(e.current_amount)} (лимит {fmt_money(e.target_amount or 0)})")
 
     parts = ["📊 <b>Финансовый навигатор</b>\n"]
     
@@ -621,7 +621,8 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                                 target_amount=env_data.target_amount,
                                 current_amount=env_data.current_amount,
                                 is_debt=env_data.is_debt,
-                                is_goal=env_data.is_goal
+                                is_goal=env_data.is_goal,
+                                min_payment=env_data.min_payment
                             )
                             session.add(new_env)
                             envelopes.append(new_env)
@@ -637,6 +638,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             existing.current_amount = env_data.current_amount
                             existing.is_debt = env_data.is_debt
                             existing.is_goal = env_data.is_goal
+                            existing.min_payment = env_data.min_payment
                             affected_envs.append(existing)
                         else:
                             new_env = Envelope(
@@ -645,7 +647,8 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                                 target_amount=env_data.target_amount,
                                 current_amount=env_data.current_amount,
                                 is_debt=env_data.is_debt,
-                                is_goal=env_data.is_goal
+                                is_goal=env_data.is_goal,
+                                min_payment=env_data.min_payment
                             )
                             session.add(new_env)
                             affected_envs.append(new_env)
