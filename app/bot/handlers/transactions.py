@@ -210,12 +210,14 @@ def calculate_forecasts(envelopes: list, monthly_income: float) -> dict:
     for d in active_debts:
         sim_items.append({
             "name": d.name,
+            "initial": (d.target_amount or 0) - d.current_amount,
             "remaining": (d.target_amount or 0) - d.current_amount,
             "is_debt": True
         })
     for g in active_goals:
         sim_items.append({
             "name": g.name,
+            "initial": (g.target_amount or 0) - g.current_amount,
             "remaining": (g.target_amount or 0) - g.current_amount,
             "is_debt": False
         })
@@ -223,6 +225,7 @@ def calculate_forecasts(envelopes: list, monthly_income: float) -> dict:
     completed = {}
     current_month = 0
     max_months = 120
+    end_of_first_month_debts = []
     
     while any(item["remaining"] > 0 for item in sim_items) and current_month < max_months:
         current_month += 1
@@ -237,11 +240,21 @@ def calculate_forecasts(envelopes: list, monthly_income: float) -> dict:
                     item["remaining"] -= available
                     available = 0.0
                     break
+        
+        if current_month == 1:
+            for item in sim_items:
+                if item["is_debt"]:
+                    end_of_first_month_debts.append({
+                        "name": item["name"],
+                        "initial": item["initial"],
+                        "remaining": item["remaining"]
+                    })
 
     return {
         "status": "ok",
         "free_cash": free_cash,
-        "completed": completed
+        "completed": completed,
+        "end_of_first_month_debts": end_of_first_month_debts
     }
 
 
@@ -292,22 +305,56 @@ def get_financial_insight(envelopes: list, monthly_income: float = 0.0) -> str:
             insight = "🚀 <b>Фокус:</b> Бюджет сбалансирован. Все свободные деньги теперь работают на твои цели!"
         else:
             insight = "💡 Бюджет в норме. Распределяй новые доходы по правилу: сначала плати себе (буфер), потом трать."
-            
-    # Добавляем блок прогнозов
+
+    # Блок прогнозов
+    forecast_section = "\n🔮 <b>Прогноз до конца месяца:</b>\n"
     if monthly_income > 0:
         forecast = calculate_forecasts(envelopes, monthly_income)
-        if forecast["status"] == "ok" and forecast["completed"]:
-            lines = []
-            for name, months in forecast["completed"].items():
-                lines.append(f"• {name}: {fmt_months_ru(months)}")
-            forecast_text = "\n📅 <b>Если придерживаться плана:</b>\n" + "\n".join(lines)
-            insight += "\n" + forecast_text
+        if forecast["status"] == "ok":
+            free_cash = forecast["free_cash"]
+            total_debt_reduction = 0
+            if forecast.get("end_of_first_month_debts"):
+                for d in forecast["end_of_first_month_debts"]:
+                    total_debt_reduction += (d["initial"] - d["remaining"])
+            
+            total_debt_start = sum((d.target_amount or 0) - d.current_amount for d in debt_envs)
+            total_debt_end = max(0.0, total_debt_start - total_debt_reduction)
+            
+            max_months = 0
+            if forecast.get("completed"):
+                for d_name, months in forecast["completed"].items():
+                    target_env = next((env for env in envelopes if env.name == d_name), None)
+                    if target_env and getattr(target_env, 'is_debt', False):
+                        if months > max_months:
+                            max_months = months
+
+            forecast_lines = []
+            forecast_lines.append(f"├─ 🟢 <b>Хватит на всё?</b> Да, останется +{fmt_money(free_cash)}")
+            
+            if total_debt_start > 0:
+                forecast_lines.append(f"├─ 📉 <b>Долги к след. месяцу:</b> {fmt_money(total_debt_end)} (снизятся на {fmt_money(total_debt_reduction)})")
+                if max_months > 0:
+                    forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> {fmt_months_ru(max_months)}")
+                else:
+                    forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
+            else:
+                forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
+                
+            forecast_section += "\n".join(forecast_lines)
+            
         elif forecast["status"] == "negative_or_zero":
-            insight += "\n⚠️ <i>Расходы превышают доходы или равны им. Сбалансируй бюджет, чтобы начать гасить долги.</i>"
+            free_cash = forecast["free_cash"]
+            deficit_amt = -free_cash
+            forecast_lines = [
+                f"├─ 🔴 <b>Хватит на всё?</b> Нет, дефицит -{fmt_money(deficit_amt)}",
+                "├─ ⚠️ <b>Совет:</b> сократите необязательные расходы или временно не вносите досрочные платежи.",
+                "└─ ⏳ <b>Свобода от долгов:</b> на паузе (требуется балансировка)"
+            ]
+            forecast_section += "\n".join(forecast_lines)
     else:
-        insight += "\n💡 <i>Задай месячный доход (например: «мой доход 100к»), чтобы увидеть прогноз закрытия долгов и целей.</i>"
+        forecast_section += "💡 <i>Задайте планируемый доход (например: «мой доход 120к»), чтобы построить прогноз.</i>"
         
-    return insight
+    return insight + "\n" + forecast_section
 
 
 def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
@@ -361,17 +408,29 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
         parts.append(get_health_status(envelopes))
         
         # Calculate obligations and deficit
-        total_obligations = (
-            sum(e.target_amount or 0 for e in expense_envs)
-            + sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
-        )
-        total_funded = sum(e.current_amount for e in expense_envs)
+        expenses_obligations = sum(e.target_amount or 0 for e in expense_envs)
+        debts_obligations = sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
+        total_obligations = expenses_obligations + debts_obligations
+        
+        total_funded = sum(e.current_amount for e in expense_envs) + unallocated_amount
         deficit = max(0.0, total_obligations - total_funded)
         
+        # Calculate tree block for ВАШИ ДЕНЬГИ
+        total_in_envelopes = sum(e.current_amount for e in expense_envs) + sum(e.current_amount for e in envelopes if getattr(e, 'is_goal', False))
+        total_money = total_in_envelopes + unallocated_amount
+        
         parts.append(
-            f"🔴 <b>Всего обязательств в этом месяце:</b> {fmt_money(total_obligations)}\n"
+            f"💰 <b>ВАШИ ДЕНЬГИ:</b> {fmt_money(total_money)}\n"
+            f"├─ 🔒 <b>В конвертах:</b> {fmt_money(total_in_envelopes)} (обеспечено)\n"
+            f"└─ 💸 <b>Свободный кэш:</b> {fmt_money(unallocated_amount)} ⚠️ (не распределен)\n"
+            f"<i>👉 Нажмите /allocate, чтобы разложить деньги по конвертам.</i>\n"
+        )
+        
+        parts.append(
+            f"💳 <b>ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> {fmt_money(total_obligations)} "
+            f"(расходы {fmt_money(expenses_obligations)} + мин. платежи {fmt_money(debts_obligations)})\n"
             f"🟢 <b>Обеспечено деньгами:</b> {fmt_money(total_funded)}\n"
-            f"🟡 <b>Не хватает:</b> {fmt_money(deficit)}"
+            f"🟡 <b>Не хватает:</b> {fmt_money(deficit)}\n"
         )
         parts.append(get_financial_insight(envelopes, monthly_income=monthly_income) + "\n")
 
@@ -392,7 +451,7 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
     if personal_lines:
         parts.append("\n🤝 <b>Долги близким:</b>\n" + "\n".join(personal_lines))
         
-    if unallocated_amount > 0:
+    if len(envelopes) <= 1 and unallocated_amount > 0:
         parts.append(f"\n💵 <b>Свободный кэш:</b> {fmt_money(unallocated_amount)}")
         
     if len(parts) == 1 and unallocated_amount == 0:
