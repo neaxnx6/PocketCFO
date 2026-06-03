@@ -273,6 +273,17 @@ def fmt_months_ru(n: int) -> str:
         return f"через {n} месяцев"
 
 
+def get_envelope_group(name: str) -> str:
+    n = name.lower()
+    if any(k in n for k in ("аренда", "коммуналка", "интернет", "связь", "жкх", "жильё", "жилье", "квартира", "дом")):
+        if "кабинет" in n or "офис" in n:
+            return "🧩 Прочее"
+        return "🏠 Дом"
+    if any(k in n for k in ("продукты", "еда", "кафе", "ресторан", "топливо", "проезд", "бензин", "транспорт", "такси", "одежда", "жизнь")):
+        return "🍔 Жизнь"
+    return "🧩 Прочее"
+
+
 def get_financial_insight(envelopes: list) -> str:
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
     buffer_env = next((e for e in envelopes if "буфер" in e.name.lower()), None)
@@ -323,6 +334,10 @@ def build_micro_navigator(envelopes: list, transactions: list, monthly_payments:
             continue
         env = _find_envelope(envelopes, tx.target_envelope_name)
         if not env:
+            continue
+            
+        # Skip redundant display for the unallocated wallet itself
+        if env.name.lower().strip() in ("нераспределённые", "кошелек", "кошелёк"):
             continue
             
         if getattr(env, 'is_debt', False):
@@ -386,17 +401,17 @@ def build_dashboard(
         total_money = total_in_envelopes + unallocated_amount + buffer_amount
         
         parts.append(
-            f"💰 <b>ВАШИ ДЕНЬГИ:</b> <b>{fmt_money(total_money)}</b>\n"
-            f"• 🔒 В конвертах: <b>{fmt_money(total_in_envelopes)}</b> (обеспечено)\n"
-            f"• 💸 Свободный кэш: <b>{fmt_money(unallocated_amount)}</b> (не распределен)\n"
-            f"• 🛡 Буфер (подушка): <b>{fmt_money(buffer_amount)}</b>"
+            f"💰 <b>Деньги:</b> <b>{fmt_money(total_money)}</b>\n"
+            f"• Свободно: <b>{fmt_money(unallocated_amount)}</b>\n"
+            f"• В конвертах: <b>{fmt_money(total_in_envelopes)}</b>\n"
+            f"• Буфер: <b>{fmt_money(buffer_amount)}</b>"
         )
         parts.append("")
         
         parts.append(
-            f"💳 <b>ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> <b>{fmt_money(total_obligations)}</b>\n"
+            f"💳 <b>ОБЯЗАТЕЛЬСТВА:</b> <b>{fmt_money(total_obligations)}</b>\n"
             f"• ✅ Обеспечено: <b>{fmt_money(total_funded)}</b>\n"
-            f"• 🚨 Не хватает (дефицит): <b>{fmt_money(deficit)}</b>"
+            f"• 🚨 Не хватает: <b>{fmt_money(deficit)}</b>"
         )
         parts.append("")
         
@@ -406,14 +421,32 @@ def build_dashboard(
 
     # === ВКЛАДКА 2: РАСХОДЫ ===
     elif tab == 'expenses':
-        parts.append("📍 <b>ВКЛАДКА: РАСХОДЫ И ЛИМИТЫ</b>\n")
+        parts.append("📍 <b>ВКЛАДКА: РАСХОДЫ</b>\n")
         
         if expense_envs:
-            expense_lines = []
+            groups = {
+                "🏠 Дом": [],
+                "🍔 Жизнь": [],
+                "🧩 Прочее": []
+            }
             for e in expense_envs:
-                status_emoji = "✅" if e.current_amount >= (e.target_amount or 0) else "⚪"
-                expense_lines.append(f"{status_emoji} {e.name}: доступно <b>{fmt_money(e.current_amount)}</b> (лимит <b>{fmt_money(e.target_amount or 0)}</b>)")
-            parts.append("🛍 <b>Повседневные расходы:</b>\n" + "\n".join(expense_lines))
+                grp = get_envelope_group(e.name)
+                groups[grp].append(e)
+                
+            parts.append("🛍 <b>Расходы:</b>")
+            for grp_name, envs in groups.items():
+                if not envs:
+                    continue
+                lines = []
+                grp_available = 0.0
+                grp_limit = 0.0
+                for e in envs:
+                    status_emoji = "✅" if e.current_amount >= (e.target_amount or 0) else "⚪"
+                    lines.append(f"  {status_emoji} {e.name}: доступно <b>{fmt_money(e.current_amount)}</b> (лимит <b>{fmt_money(e.target_amount or 0)}</b>)")
+                    grp_available += e.current_amount
+                    grp_limit += e.target_amount or 0.0
+                
+                parts.append(f"\n{grp_name} (всего <b>{fmt_money(grp_available)}</b> из <b>{fmt_money(grp_limit)}</b>):\n" + "\n".join(lines))
             
         if goal_envs:
             goal_lines = []
@@ -442,7 +475,8 @@ def build_dashboard(
             for e in active_credits:
                 rem = (e.target_amount or 0) - e.current_amount
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
-                credit_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> из <b>{fmt_money(e.target_amount or 0)}</b> (погашено <b>{pct}%</b>, мин. платёж <b>{fmt_money(e.min_payment)}</b>)")
+                pct_str = f", погашено <b>{pct}%</b>" if pct >= 10 else ""
+                credit_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> из <b>{fmt_money(e.target_amount or 0)}</b> (мин. платёж <b>{fmt_money(e.min_payment)}</b>{pct_str})")
             parts.append("🏦 <b>Банковские кредиты и карты:</b>\n" + "\n".join(credit_lines))
             
         active_personal = [d for d in debt_envs if (d.min_payment or 0) <= 0 and (d.target_amount or 0) - d.current_amount > 0]
@@ -451,7 +485,9 @@ def build_dashboard(
             for e in active_personal:
                 rem = (e.target_amount or 0) - e.current_amount
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
-                personal_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> из <b>{fmt_money(e.target_amount or 0)}</b> (погашено <b>{pct}%</b>)")
+                pct_str = f", погашено <b>{pct}%</b>" if pct >= 10 else ""
+                credit_lines_term = f" ({pct_str.lstrip(', ')})" if pct_str else ""
+                personal_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> из <b>{fmt_money(e.target_amount or 0)}</b>{credit_lines_term}")
             parts.append("\n🤝 <b>Долги близким:</b>\n" + "\n".join(personal_lines))
             
         all_active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
@@ -571,7 +607,15 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=dashboard))
                 await session.commit()
                 
-                await message.answer(dashboard, parse_mode="HTML")
+                reply_markup = None
+                unallocated = _find_unallocated(envelopes)
+                unallocated_amount = unallocated.current_amount if unallocated else 0.0
+                if tab == 'navigator' and unallocated_amount > 0:
+                    reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+                        [InlineKeyboardButton(text=f"📥 Распределить {fmt_money(unallocated_amount)}", callback_data="start_allocation")]
+                    ])
+                
+                await message.answer(dashboard, parse_mode="HTML", reply_markup=reply_markup)
                 return
 
             loading_msgs = []
@@ -1169,10 +1213,35 @@ async def show_envelopes_callback(callback):
         tab='navigator', 
         monthly_payments=monthly_payments
     )
+    
+    reply_markup = None
+    unallocated = _find_unallocated(envelopes)
+    unallocated_amount = unallocated.current_amount if unallocated else 0.0
+    if unallocated_amount > 0:
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text=f"📥 Распределить {fmt_money(unallocated_amount)}", callback_data="start_allocation")]
+        ])
+        
     try:
-        await callback.message.edit_text(dashboard, parse_mode="HTML")
+        await callback.message.edit_text(dashboard, parse_mode="HTML", reply_markup=reply_markup)
     except Exception:
-        await callback.message.answer(dashboard, parse_mode="HTML")
+        await callback.message.answer(dashboard, parse_mode="HTML", reply_markup=reply_markup)
+
+
+from aiogram.filters import Command
+
+@router.message(Command("allocate"))
+async def cmd_allocate(message: Message, state: FSMContext):
+    await message.chat.do("typing")
+    await handle_transaction(message, "распредели свободные деньги", state=state)
+
+
+@router.callback_query(F.data == "start_allocation")
+async def start_allocation_callback(callback, state: FSMContext):
+    await callback.answer()
+    msg = callback.message
+    msg.from_user = callback.from_user
+    await handle_transaction(msg, "распредели свободные деньги", state=state)
 
 
 @router.message(F.text & ~F.text.startswith('/'))

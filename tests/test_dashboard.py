@@ -23,9 +23,11 @@ def test_build_dashboard_navigator():
     
     result = build_dashboard(envelopes, monthly_income=70000, tab='navigator', monthly_payments={})
     assert "ВКЛАДКА: НАВИГАТОР" in result
-    assert "ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> <b>40к</b>" in result
+    assert "Деньги:</b> <b>45к</b>" in result
+    assert "Свободно: <b>10к</b>" in result
+    assert "ОБЯЗАТЕЛЬСТВА:</b> <b>40к</b>" in result
     assert "Обеспечено: <b>45к</b>" in result
-    assert "Не хватает (дефицит): <b>0</b>" in result
+    assert "Не хватает: <b>0</b>" in result
 
 def test_build_dashboard_expenses():
     envelopes = [
@@ -36,7 +38,8 @@ def test_build_dashboard_expenses():
     
     monthly_payments = {2: 2000.0}
     result = build_dashboard(envelopes, monthly_income=70000, tab='expenses', monthly_payments=monthly_payments)
-    assert "ВКЛАДКА: РАСХОДЫ И ЛИМИТЫ" in result
+    assert "ВКЛАДКА: РАСХОДЫ" in result
+    assert "🏠 Дом" in result
     assert "Аренда: доступно <b>35к</b>" in result
     assert "Кредитка (мин. платёж): оплачено <b>2к</b> из <b>5к</b>" in result
 
@@ -49,7 +52,7 @@ def test_build_dashboard_debts():
     
     result = build_dashboard(envelopes, monthly_income=70000, tab='debts')
     assert "ВКЛАДКА: ДОЛГОВЫЕ ОБЯЗАТЕЛЬСТВА" in result
-    assert "Кредитка: осталось <b>40к</b> из <b>50к</b>" in result
+    assert "Кредитка: осталось <b>40к</b> из <b>50к</b> (мин. платёж <b>5к</b>, погашено <b>20%</b>)" in result
     assert "Прогноз до конца месяца:" in result
 
 def test_build_micro_navigator():
@@ -62,6 +65,7 @@ def test_build_micro_navigator():
     transactions = [
         MockTx("Аренда"),
         MockTx("Кредитка"),
+        MockTx("Нераспределённые"),  # This redundant one should be skipped
     ]
     
     monthly_payments = {2: 5000.0}
@@ -70,3 +74,5 @@ def test_build_micro_navigator():
     assert "Свободный кэш:</b> <b>10к</b>" in micro_nav
     assert "«Аренда»:</b> осталось <b>35к</b> из <b>35к</b>" in micro_nav
     assert "«Кредитка» (мин. платёж):</b> оплачено <b>5к</b> из <b>5к</b>" in micro_nav
+    # verify that the unallocated wallet is skipped and not duplicated at the bottom
+    assert "Нераспределённые" not in micro_nav
