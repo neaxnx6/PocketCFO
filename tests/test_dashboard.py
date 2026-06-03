@@ -51,8 +51,8 @@ def test_build_dashboard_debts():
     ]
     
     result = build_dashboard(envelopes, monthly_income=70000, tab='debts')
-    assert "ВКЛАДКА: ДОЛГОВЫЕ ОБЯЗАТЕЛЬСТВА" in result
-    assert "Кредитка: осталось <b>40к</b> из <b>50к</b> (мин. платёж <b>5к</b>, погашено <b>20%</b>)" in result
+    assert "ВКЛАДКА: ДОЛГИ" in result
+    assert "Кредитка: осталось <b>40к</b> (мин. платёж <b>5к</b>, погашено <b>20%</b>)" in result
     assert "Прогноз до конца месяца:" in result
 
 def test_build_micro_navigator():

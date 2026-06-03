@@ -410,8 +410,8 @@ def build_dashboard(
         
         parts.append(
             f"💳 <b>ОБЯЗАТЕЛЬСТВА:</b> <b>{fmt_money(total_obligations)}</b>\n"
-            f"• ✅ Обеспечено: <b>{fmt_money(total_funded)}</b>\n"
-            f"• 🚨 Не хватает: <b>{fmt_money(deficit)}</b>"
+            f"• Обеспечено: <b>{fmt_money(total_funded)}</b>\n"
+            f"• Не хватает: <b>{fmt_money(deficit)}</b>"
         )
         parts.append("")
         
@@ -441,8 +441,7 @@ def build_dashboard(
                 grp_available = 0.0
                 grp_limit = 0.0
                 for e in envs:
-                    status_emoji = "✅" if e.current_amount >= (e.target_amount or 0) else "⚪"
-                    lines.append(f"  {status_emoji} {e.name}: доступно <b>{fmt_money(e.current_amount)}</b> (лимит <b>{fmt_money(e.target_amount or 0)}</b>)")
+                    lines.append(f"• {e.name}: доступно <b>{fmt_money(e.current_amount)}</b> (лимит <b>{fmt_money(e.target_amount or 0)}</b>)")
                     grp_available += e.current_amount
                     grp_limit += e.target_amount or 0.0
                 
@@ -461,13 +460,12 @@ def build_dashboard(
             for d in active_debts_with_min:
                 paid_this_month = monthly_payments.get(d.id, 0.0) if monthly_payments else 0.0
                 paid_min = min(paid_this_month, d.min_payment)
-                status_emoji = "✅" if paid_min >= d.min_payment else "⚪"
-                min_pay_lines.append(f"{status_emoji} {d.name} (мин. платёж): оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(d.min_payment)}</b>")
+                min_pay_lines.append(f"• {d.name} (мин. платёж): оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(d.min_payment)}</b>")
             parts.append("\n💳 <b>Обязательные платежи по кредитам:</b>\n" + "\n".join(min_pay_lines))
 
     # === ВКЛАДКА 3: ДОЛГИ ===
     elif tab == 'debts':
-        parts.append("📍 <b>ВКЛАДКА: ДОЛГОВЫЕ ОБЯЗАТЕЛЬСТВА</b>\n")
+        parts.append("📍 <b>ВКЛАДКА: ДОЛГИ</b>\n")
         
         active_credits = [d for d in debt_envs if (d.min_payment or 0) > 0 and (d.target_amount or 0) - d.current_amount > 0]
         if active_credits:
@@ -476,7 +474,7 @@ def build_dashboard(
                 rem = (e.target_amount or 0) - e.current_amount
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
                 pct_str = f", погашено <b>{pct}%</b>" if pct >= 10 else ""
-                credit_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> из <b>{fmt_money(e.target_amount or 0)}</b> (мин. платёж <b>{fmt_money(e.min_payment)}</b>{pct_str})")
+                credit_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> (мин. платёж <b>{fmt_money(e.min_payment)}</b>{pct_str})")
             parts.append("🏦 <b>Банковские кредиты и карты:</b>\n" + "\n".join(credit_lines))
             
         active_personal = [d for d in debt_envs if (d.min_payment or 0) <= 0 and (d.target_amount or 0) - d.current_amount > 0]
@@ -487,7 +485,7 @@ def build_dashboard(
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
                 pct_str = f", погашено <b>{pct}%</b>" if pct >= 10 else ""
                 credit_lines_term = f" ({pct_str.lstrip(', ')})" if pct_str else ""
-                personal_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> из <b>{fmt_money(e.target_amount or 0)}</b>{credit_lines_term}")
+                personal_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b>{credit_lines_term}")
             parts.append("\n🤝 <b>Долги близким:</b>\n" + "\n".join(personal_lines))
             
         all_active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
@@ -1006,19 +1004,21 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
             alloc_amounts = [a.amount for a in allocs]
             
             if current_state != IncomeStates.confirming.state:
-                # LLM forgot to put action="income" in transactions list. Auto-infer it!
+                # Check if this is allocating existing unallocated cash vs new income auto-inference
+                is_existing_allocation = (text == "распредели свободные деньги")
                 total_income = sum(a.amount for a in allocs)
                 unallocated = _find_unallocated(envelopes)
                 if unallocated:
-                    unallocated.current_amount += total_income
-                    tx = Transaction(
-                        user_id=user.telegram_id,
-                        amount=total_income,
-                        envelope_id=unallocated.id,
-                        description="Доход (авто-возобновление)"
-                    )
-                    session.add(tx)
-                    await session.commit()
+                    if not is_existing_allocation:
+                        unallocated.current_amount += total_income
+                        tx = Transaction(
+                            user_id=user.telegram_id,
+                            amount=total_income,
+                            envelope_id=unallocated.id,
+                            description="Доход (авто-возобновление)"
+                        )
+                        session.add(tx)
+                        await session.commit()
                     
                     await state.set_state(IncomeStates.confirming)
                     await state.set_data({
@@ -1239,8 +1239,7 @@ async def cmd_allocate(message: Message, state: FSMContext):
 @router.callback_query(F.data == "start_allocation")
 async def start_allocation_callback(callback, state: FSMContext):
     await callback.answer()
-    msg = callback.message
-    msg.from_user = callback.from_user
+    msg = callback.message.model_copy(update={"from_user": callback.from_user})
     await handle_transaction(msg, "распредели свободные деньги", state=state)
 
 
