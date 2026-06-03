@@ -684,6 +684,23 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             f"Твои income_allocations ДОЛЖНЫ СУММИРОВАТЬСЯ РОВНО {pending_income:.0f} руб. "
                             f"Не больше, не меньше. Укажи intent=transaction и income_allocations.]"
                         )
+            
+            if not negotiation_context:
+                is_allocate_request = (
+                    text == "распредели свободные деньги"
+                    or ("распредели" in text.lower() and ("свободн" in text.lower() or "кэш" in text.lower()))
+                )
+                if is_allocate_request:
+                    unallocated = _find_unallocated(envelopes)
+                    unallocated_amount = unallocated.current_amount if unallocated else 0.0
+                    if unallocated_amount > 0:
+                        negotiation_context = (
+                            f"\n\n[SYSTEM: Пользователь просит распределить уже имеющиеся свободные деньги ({fmt_money(unallocated_amount)}). "
+                            f"ОБЯЗАТЕЛЬНО: "
+                            f"1. Выбери intent = 'transaction' (НЕ profile_update, так как бюджет уже настроен). "
+                            f"2. Предложи распределить всю сумму ({fmt_money(unallocated_amount)}) в массиве income_allocations под ноль. "
+                            f"3. В coach_reply опиши подробное предложение распределения (например: 'Предлагаю распределить {fmt_money(unallocated_amount)}:\n• 10к → Долг Сбер\n• 1к → Буфер\n\nПодтверди или предложи своё.').]"
+                        )
 
             brain_response = await process_user_message(
                 user_text=text + negotiation_context,
