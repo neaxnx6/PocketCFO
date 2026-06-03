@@ -282,7 +282,7 @@ def get_financial_insight(envelopes: list) -> str:
     active_debts_with_min = [d for d in debt_envs if (d.min_payment or 0) > 0 and (d.target_amount or 0) - d.current_amount > 0]
     if active_debts_with_min:
         total_min_pay = sum(d.min_payment or 0 for d in active_debts_with_min)
-        lines = [f"{d.name} ({fmt_money(d.min_payment)})" for d in active_debts_with_min]
+        lines = [f"{d.name} (<b>{fmt_money(d.min_payment)}</b>)" for d in active_debts_with_min]
         insight = f"🔥 <b>Следующий шаг:</b> Обеспечить минимальные платежи по кредиткам на сумму <b>{fmt_money(total_min_pay)}</b>:\n" + "\n".join(f"• {l}" for l in lines)
         
     # 2. Zero Buffer Alert
@@ -296,7 +296,7 @@ def get_financial_insight(envelopes: list) -> str:
         smallest_debt = active_debts[0]
         remaining = (smallest_debt.target_amount or 0) - smallest_debt.current_amount
         if remaining < 10000:
-            insight = f"🔥 <b>Следующий шаг:</b> Добить остаток по «{smallest_debt.name}» ({fmt_money(remaining)}). Один рывок — и минус один долг!"
+            insight = f"🔥 <b>Следующий шаг:</b> Добить остаток по «{smallest_debt.name}» (<b>{fmt_money(remaining)}</b>). Один рывок — и минус один долг!"
         else:
             insight = "💡 <b>Фокус:</b> Продолжаем методично гасить кредиты. Каждая тысяча сверх минимума экономит тебе время и проценты."
             
@@ -316,7 +316,7 @@ def build_micro_navigator(envelopes: list, transactions: list, monthly_payments:
     
     unallocated = _find_unallocated(envelopes)
     unallocated_amt = unallocated.current_amount if unallocated else 0.0
-    lines.append(f"💰 <b>Свободный кэш:</b> {fmt_money(unallocated_amt)}")
+    lines.append(f"💰 <b>Свободный кэш:</b> <b>{fmt_money(unallocated_amt)}</b>")
     
     for tx in transactions:
         if not tx.target_envelope_name:
@@ -329,12 +329,12 @@ def build_micro_navigator(envelopes: list, transactions: list, monthly_payments:
             if (env.min_payment or 0) > 0:
                 paid_this_month = monthly_payments.get(env.id, 0.0) if monthly_payments else 0.0
                 paid_min = min(paid_this_month, env.min_payment)
-                lines.append(f"💳 <b>«{env.name}» (мин. платёж):</b> оплачено {fmt_money(paid_min)} из {fmt_money(env.min_payment)}")
+                lines.append(f"💳 <b>«{env.name}» (мин. платёж):</b> оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(env.min_payment)}</b>")
         elif getattr(env, 'is_goal', False):
-            target_str = f" из {fmt_money(env.target_amount)}" if env.target_amount else ""
-            lines.append(f"🎯 <b>«{env.name}»:</b> накоплено {fmt_money(env.current_amount)}{target_str}")
+            target_str = f" из <b>{fmt_money(env.target_amount)}</b>" if env.target_amount else ""
+            lines.append(f"🎯 <b>«{env.name}»:</b> накоплено <b>{fmt_money(env.current_amount)}</b>{target_str}")
         else:
-            lines.append(f"🛍 <b>Лимит «{env.name}»:</b> осталось {fmt_money(env.current_amount)} из {fmt_money(env.target_amount or 0)}")
+            lines.append(f"🛍 <b>Лимит «{env.name}»:</b> осталось <b>{fmt_money(env.current_amount)}</b> из <b>{fmt_money(env.target_amount or 0)}</b>")
             
     return "\n📊 <b>Микро-Навигатор:</b>\n" + "\n".join(lines)
 
@@ -372,6 +372,7 @@ def build_dashboard(
     if tab == 'navigator':
         parts.append("📍 <b>ВКЛАДКА: НАВИГАТОР</b>\n")
         parts.append(get_health_status(envelopes))
+        parts.append("")  # Empty line
         
         expenses_obligations = sum(e.target_amount or 0 for e in expense_envs)
         debts_obligations = sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
@@ -381,20 +382,23 @@ def build_dashboard(
         deficit = max(0.0, total_obligations - total_funded)
         
         total_in_envelopes = sum(e.current_amount for e in expense_envs) + sum(e.current_amount for e in envelopes if getattr(e, 'is_goal', False))
-        total_money = total_in_envelopes + unallocated_amount
+        buffer_amount = buffer_env.current_amount if buffer_env else 0.0
+        total_money = total_in_envelopes + unallocated_amount + buffer_amount
         
         parts.append(
-            f"💰 <b>ВАШИ ДЕНЬГИ:</b> {fmt_money(total_money)}\n"
-            f"├─ 🔒 <b>В конвертах:</b> {fmt_money(total_in_envelopes)} (обеспечено)\n"
-            f"└─ 💸 <b>Свободный кэш:</b> {fmt_money(unallocated_amount)} ⚠️ (не распределен)\n"
-            f"<i>👉 Напишите /allocate, чтобы разложить деньги по конвертам.</i>\n"
+            f"💰 <b>ВАШИ ДЕНЬГИ:</b> <b>{fmt_money(total_money)}</b>\n"
+            f"• 🔒 В конвертах: <b>{fmt_money(total_in_envelopes)}</b> (обеспечено)\n"
+            f"• 💸 Свободный кэш: <b>{fmt_money(unallocated_amount)}</b> (не распределен)\n"
+            f"• 🛡 Буфер (подушка): <b>{fmt_money(buffer_amount)}</b>"
         )
+        parts.append("")
         
         parts.append(
-            f"💳 <b>ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> {fmt_money(total_obligations)}\n"
-            f"├─ ✅ <b>Обеспечено:</b> {fmt_money(total_funded)}\n"
-            f"└─ 🚨 <b>Не хватает (дефицит):</b> {fmt_money(deficit)}\n"
+            f"💳 <b>ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> <b>{fmt_money(total_obligations)}</b>\n"
+            f"• ✅ Обеспечено: <b>{fmt_money(total_funded)}</b>\n"
+            f"• 🚨 Не хватает (дефицит): <b>{fmt_money(deficit)}</b>"
         )
+        parts.append("")
         
         insight = get_financial_insight(envelopes)
         if insight:
@@ -407,20 +411,15 @@ def build_dashboard(
         if expense_envs:
             expense_lines = []
             for e in expense_envs:
-                status_emoji = "✅" if e.current_amount >= (e.target_amount or 0) else "❌"
-                expense_lines.append(f"{status_emoji} {e.name}: доступно {fmt_money(e.current_amount)} (лимит {fmt_money(e.target_amount or 0)})")
+                status_emoji = "✅" if e.current_amount >= (e.target_amount or 0) else "⚪"
+                expense_lines.append(f"{status_emoji} {e.name}: доступно <b>{fmt_money(e.current_amount)}</b> (лимит <b>{fmt_money(e.target_amount or 0)}</b>)")
             parts.append("🛍 <b>Повседневные расходы:</b>\n" + "\n".join(expense_lines))
-            
-        if buffer_env:
-            parts.append(f"\n🛡 <b>Буфер (подушка):</b> {fmt_money(buffer_env.current_amount)}")
-        else:
-            parts.append("\n🛡 <b>Буфер (подушка):</b> 0")
             
         if goal_envs:
             goal_lines = []
             for e in goal_envs:
-                target_str = f" (цель {fmt_money(e.target_amount or 0)})" if (e.target_amount or 0) > 0 else ""
-                goal_lines.append(f"• {e.name}: накоплено {fmt_money(e.current_amount)}{target_str}")
+                target_str = f" (цель <b>{fmt_money(e.target_amount or 0)}</b>)" if (e.target_amount or 0) > 0 else ""
+                goal_lines.append(f"• {e.name}: накоплено <b>{fmt_money(e.current_amount)}</b>{target_str}")
             parts.append("\n🎯 <b>Цели и накопления:</b>\n" + "\n".join(goal_lines))
             
         active_debts_with_min = [d for d in debt_envs if (d.min_payment or 0) > 0 and (d.target_amount or 0) - d.current_amount > 0]
@@ -429,8 +428,8 @@ def build_dashboard(
             for d in active_debts_with_min:
                 paid_this_month = monthly_payments.get(d.id, 0.0) if monthly_payments else 0.0
                 paid_min = min(paid_this_month, d.min_payment)
-                status_emoji = "✅" if paid_min >= d.min_payment else "❌"
-                min_pay_lines.append(f"{status_emoji} {d.name} (мин. платёж): оплачено {fmt_money(paid_min)} из {fmt_money(d.min_payment)}")
+                status_emoji = "✅" if paid_min >= d.min_payment else "⚪"
+                min_pay_lines.append(f"{status_emoji} {d.name} (мин. платёж): оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(d.min_payment)}</b>")
             parts.append("\n💳 <b>Обязательные платежи по кредитам:</b>\n" + "\n".join(min_pay_lines))
 
     # === ВКЛАДКА 3: ДОЛГИ ===
@@ -443,8 +442,7 @@ def build_dashboard(
             for e in active_credits:
                 rem = (e.target_amount or 0) - e.current_amount
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
-                min_pay_str = f", мин. платёж {fmt_money(e.min_payment)}"
-                credit_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}{min_pay_str}, погашено {pct}%)")
+                credit_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> из <b>{fmt_money(e.target_amount or 0)}</b> (погашено <b>{pct}%</b>, мин. платёж <b>{fmt_money(e.min_payment)}</b>)")
             parts.append("🏦 <b>Банковские кредиты и карты:</b>\n" + "\n".join(credit_lines))
             
         active_personal = [d for d in debt_envs if (d.min_payment or 0) <= 0 and (d.target_amount or 0) - d.current_amount > 0]
@@ -453,7 +451,7 @@ def build_dashboard(
             for e in active_personal:
                 rem = (e.target_amount or 0) - e.current_amount
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
-                personal_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}, погашено {pct}%)")
+                personal_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> из <b>{fmt_money(e.target_amount or 0)}</b> (погашено <b>{pct}%</b>)")
             parts.append("\n🤝 <b>Долги близким:</b>\n" + "\n".join(personal_lines))
             
         all_active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
@@ -482,16 +480,16 @@ def build_dashboard(
                                 max_months = months
 
                 forecast_lines = []
-                forecast_lines.append(f"├─ 🟢 <b>Хватит на всё?</b> Да, останется +{fmt_money(free_cash)}")
+                forecast_lines.append(f"• 🟢 <b>Хватит на всё?</b> Да, останется <b>+{fmt_money(free_cash)}</b>")
                 
                 if total_debt_start > 0:
-                    forecast_lines.append(f"├─ 📉 <b>Долги к след. месяцу:</b> {fmt_money(total_debt_end)} (снизятся на {fmt_money(total_debt_reduction)})")
+                    forecast_lines.append(f"• 📉 <b>Долги к след. месяцу:</b> <b>{fmt_money(total_debt_end)}</b> (снизятся на <b>{fmt_money(total_debt_reduction)}</b>)")
                     if max_months > 0:
-                        forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> {fmt_months_ru(max_months)}")
+                        forecast_lines.append(f"• ⏳ <b>Свобода от долгов:</b> {fmt_months_ru(max_months)}")
                     else:
-                        forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
+                        forecast_lines.append(f"• ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
                 else:
-                    forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
+                    forecast_lines.append(f"• ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
                     
                 forecast_section += "\n".join(forecast_lines)
                 
@@ -499,9 +497,9 @@ def build_dashboard(
                 free_cash = forecast["free_cash"]
                 deficit_amt = -free_cash
                 forecast_lines = [
-                    f"├─ 🔴 <b>Хватит на всё?</b> Нет, дефицит -{fmt_money(deficit_amt)}",
-                    "├─ ⚠️ <b>Совет:</b> сократите необязательные расходы или временно не вносите досрочные платежи.",
-                    "└─ ⏳ <b>Свобода от долгов:</b> на паузе (требуется балансировка)"
+                    f"• 🔴 <b>Хватит на всё?</b> Нет, дефицит <b>-{fmt_money(deficit_amt)}</b>",
+                    "• ⚠️ <b>Совет:</b> сократите необязательные расходы или временно не вносите досрочные платежи.",
+                    "• ⏳ <b>Свобода от долгов:</b> на паузе (требуется балансировка)"
                 ]
                 forecast_section += "\n".join(forecast_lines)
             parts.append(forecast_section)

@@ -23,9 +23,9 @@ def test_build_dashboard_navigator():
     
     result = build_dashboard(envelopes, monthly_income=70000, tab='navigator', monthly_payments={})
     assert "ВКЛАДКА: НАВИГАТОР" in result
-    assert "ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> 40к" in result
-    assert "Обеспечено:</b> 45к" in result
-    assert "Не хватает (дефицит):</b> 0" in result
+    assert "ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> <b>40к</b>" in result
+    assert "Обеспечено: <b>45к</b>" in result
+    assert "Не хватает (дефицит): <b>0</b>" in result
 
 def test_build_dashboard_expenses():
     envelopes = [
@@ -37,8 +37,8 @@ def test_build_dashboard_expenses():
     monthly_payments = {2: 2000.0}
     result = build_dashboard(envelopes, monthly_income=70000, tab='expenses', monthly_payments=monthly_payments)
     assert "ВКЛАДКА: РАСХОДЫ И ЛИМИТЫ" in result
-    assert "Аренда: доступно 35к" in result
-    assert "Кредитка (мин. платёж): оплачено 2к из 5к" in result
+    assert "Аренда: доступно <b>35к</b>" in result
+    assert "Кредитка (мин. платёж): оплачено <b>2к</b> из <b>5к</b>" in result
 
 def test_build_dashboard_debts():
     envelopes = [
@@ -49,7 +49,7 @@ def test_build_dashboard_debts():
     
     result = build_dashboard(envelopes, monthly_income=70000, tab='debts')
     assert "ВКЛАДКА: ДОЛГОВЫЕ ОБЯЗАТЕЛЬСТВА" in result
-    assert "Кредитка: осталось 40к" in result
+    assert "Кредитка: осталось <b>40к</b> из <b>50к</b>" in result
     assert "Прогноз до конца месяца:" in result
 
 def test_build_micro_navigator():
@@ -67,6 +67,6 @@ def test_build_micro_navigator():
     monthly_payments = {2: 5000.0}
     micro_nav = build_micro_navigator(envelopes, transactions, monthly_payments)
     assert "Микро-Навигатор:" in micro_nav
-    assert "Свободный кэш:</b> 10к" in micro_nav
-    assert "«Аренда»:</b> осталось 35к" in micro_nav
-    assert "«Кредитка» (мин. платёж):</b> оплачено 5к из 5к" in micro_nav
+    assert "Свободный кэш:</b> <b>10к</b>" in micro_nav
+    assert "«Аренда»:</b> осталось <b>35к</b> из <b>35к</b>" in micro_nav
+    assert "«Кредитка» (мин. платёж):</b> оплачено <b>5к</b> из <b>5к</b>" in micro_nav
