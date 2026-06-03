@@ -53,7 +53,10 @@ async def cmd_reset(message: Message, bot: Bot = None):
         
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
     persistent_keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📊 Мой бюджет")]],
+        keyboard=[
+            [KeyboardButton(text="📊 Навигатор")],
+            [KeyboardButton(text="🛍 Расходы"), KeyboardButton(text="💳 Долги")]
+        ],
         resize_keyboard=True,
         is_persistent=True
     )
@@ -81,7 +84,10 @@ async def cmd_start(message: Message):
             
     from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
     persistent_keyboard = ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="📊 Мой бюджет")]],
+        keyboard=[
+            [KeyboardButton(text="📊 Навигатор")],
+            [KeyboardButton(text="🛍 Расходы"), KeyboardButton(text="💳 Долги")]
+        ],
         resize_keyboard=True,
         is_persistent=True
     )

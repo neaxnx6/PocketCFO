@@ -8,6 +8,7 @@ from sqlalchemy import func
 
 from app.database.session import async_session_maker
 from app.database.models import User, Transaction, Envelope, ChatMessage
+from app.database.query_helpers import get_monthly_payments
 from app.services.ai_brain import process_user_message, IncomeAllocation
 from app.services.voice_service import transcribe_voice
 
@@ -21,6 +22,7 @@ DASHBOARD_TRIGGERS = [
     "сколько у меня", "покажи бюджет", "покажи фонд",
     "мои деньги", "мои фонды", "сводка", "дашборд",
     "мой бюджет", "📊 мой бюджет",
+    "📊 навигатор", "🛍 расходы", "💳 долги",
 ]
 
 
@@ -271,7 +273,7 @@ def fmt_months_ru(n: int) -> str:
         return f"через {n} месяцев"
 
 
-def get_financial_insight(envelopes: list, monthly_income: float = 0.0) -> str:
+def get_financial_insight(envelopes: list) -> str:
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
     buffer_env = next((e for e in envelopes if "буфер" in e.name.lower()), None)
     
@@ -305,66 +307,44 @@ def get_financial_insight(envelopes: list, monthly_income: float = 0.0) -> str:
             insight = "🚀 <b>Фокус:</b> Бюджет сбалансирован. Все свободные деньги теперь работают на твои цели!"
         else:
             insight = "💡 Бюджет в норме. Распределяй новые доходы по правилу: сначала плати себе (буфер), потом трать."
-
-    # Блок прогнозов
-    forecast_section = "\n🔮 <b>Прогноз до конца месяца:</b>\n"
-    if monthly_income > 0:
-        forecast = calculate_forecasts(envelopes, monthly_income)
-        if forecast["status"] == "ok":
-            free_cash = forecast["free_cash"]
-            total_debt_reduction = 0
-            if forecast.get("end_of_first_month_debts"):
-                for d in forecast["end_of_first_month_debts"]:
-                    total_debt_reduction += (d["initial"] - d["remaining"])
             
-            total_debt_start = sum((d.target_amount or 0) - d.current_amount for d in debt_envs)
-            total_debt_end = max(0.0, total_debt_start - total_debt_reduction)
+    return insight
+
+
+def build_micro_navigator(envelopes: list, transactions: list, monthly_payments: dict = None) -> str:
+    lines = []
+    
+    unallocated = _find_unallocated(envelopes)
+    unallocated_amt = unallocated.current_amount if unallocated else 0.0
+    lines.append(f"💰 <b>Свободный кэш:</b> {fmt_money(unallocated_amt)}")
+    
+    for tx in transactions:
+        if not tx.target_envelope_name:
+            continue
+        env = _find_envelope(envelopes, tx.target_envelope_name)
+        if not env:
+            continue
             
-            max_months = 0
-            if forecast.get("completed"):
-                for d_name, months in forecast["completed"].items():
-                    target_env = next((env for env in envelopes if env.name == d_name), None)
-                    if target_env and getattr(target_env, 'is_debt', False):
-                        if months > max_months:
-                            max_months = months
-
-            forecast_lines = []
-            forecast_lines.append(f"├─ 🟢 <b>Хватит на всё?</b> Да, останется +{fmt_money(free_cash)}")
+        if getattr(env, 'is_debt', False):
+            if (env.min_payment or 0) > 0:
+                paid_this_month = monthly_payments.get(env.id, 0.0) if monthly_payments else 0.0
+                paid_min = min(paid_this_month, env.min_payment)
+                lines.append(f"💳 <b>«{env.name}» (мин. платёж):</b> оплачено {fmt_money(paid_min)} из {fmt_money(env.min_payment)}")
+        elif getattr(env, 'is_goal', False):
+            target_str = f" из {fmt_money(env.target_amount)}" if env.target_amount else ""
+            lines.append(f"🎯 <b>«{env.name}»:</b> накоплено {fmt_money(env.current_amount)}{target_str}")
+        else:
+            lines.append(f"🛍 <b>Лимит «{env.name}»:</b> осталось {fmt_money(env.current_amount)} из {fmt_money(env.target_amount or 0)}")
             
-            if total_debt_start > 0:
-                forecast_lines.append(f"├─ 📉 <b>Долги к след. месяцу:</b> {fmt_money(total_debt_end)} (снизятся на {fmt_money(total_debt_reduction)})")
-                if max_months > 0:
-                    forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> {fmt_months_ru(max_months)}")
-                else:
-                    forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
-            else:
-                forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
-                
-            forecast_section += "\n".join(forecast_lines)
-            
-        elif forecast["status"] == "negative_or_zero":
-            free_cash = forecast["free_cash"]
-            deficit_amt = -free_cash
-            forecast_lines = [
-                f"├─ 🔴 <b>Хватит на всё?</b> Нет, дефицит -{fmt_money(deficit_amt)}",
-                "├─ ⚠️ <b>Совет:</b> сократите необязательные расходы или временно не вносите досрочные платежи.",
-                "└─ ⏳ <b>Свобода от долгов:</b> на паузе (требуется балансировка)"
-            ]
-            forecast_section += "\n".join(forecast_lines)
-    else:
-        forecast_section += "💡 <i>Задайте планируемый доход (например: «мой доход 120к»), чтобы построить прогноз.</i>"
-        
-    return insight + "\n" + forecast_section
+    return "\n📊 <b>Микро-Навигатор:</b>\n" + "\n".join(lines)
 
 
-def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
-    expense_lines = []
-    goal_lines = []
-    credit_lines = []
-    personal_lines = []
-    unallocated_amount = 0.0
-    buffer_env = None
-
+def build_dashboard(
+    envelopes: list, 
+    monthly_income: float = 0.0, 
+    tab: str = 'navigator', 
+    monthly_payments: dict = None
+) -> str:
     # Filter out categories
     expense_envs = [
         e for e in envelopes 
@@ -374,40 +354,25 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
         and e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")
     ]
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
-
+    goal_envs = [e for e in envelopes if getattr(e, 'is_goal', False) and "буфер" not in e.name.lower()]
+    buffer_env = next((e for e in envelopes if "буфер" in e.name.lower()), None)
+    
+    unallocated_amount = 0.0
     for e in envelopes:
         if e.name.lower().strip() in ("нераспределённые", "кошелек", "кошелёк"):
             unallocated_amount = e.current_amount
-            continue
             
-        if "буфер" in e.name.lower():
-            buffer_env = e
-            continue
-            
-        if getattr(e, 'is_debt', False):
-            rem = (e.target_amount or 0) - e.current_amount
-            if rem > 0:
-                pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
-                if (e.min_payment or 0) > 0:
-                    min_pay_str = f", мин. платёж {fmt_money(e.min_payment)}"
-                    credit_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}{min_pay_str}, погашено {pct}%)")
-                else:
-                    personal_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}, погашено {pct}%)")
-        elif getattr(e, 'is_goal', False):
-            target_str = f" (цель {fmt_money(e.target_amount or 0)})" if (e.target_amount or 0) > 0 else ""
-            goal_lines.append(f"• {e.name}: накоплено {fmt_money(e.current_amount)}{target_str}")
-        else:
-            # Check funded status emoji
-            status_emoji = "✅" if e.current_amount >= (e.target_amount or 0) else "❌"
-            expense_lines.append(f"{status_emoji} {e.name}: доступно {fmt_money(e.current_amount)} (лимит {fmt_money(e.target_amount or 0)})")
+    real_env_count = len(expense_envs) + len(debt_envs) + len(goal_envs) + (1 if buffer_env else 0)
+    if real_env_count == 0:
+        return "Твой бюджет пока пуст. Расскажи, сколько зарабатываешь, какие есть обязательные расходы и долги, и я составлю финансовый план! 🚀"
 
-    parts = ["📊 <b>Финансовый навигатор</b>\n"]
+    parts = []
     
-    # Emotional UX: Health Status & Insights
-    if len(envelopes) > 1:
+    # === ВКЛАДКА 1: НАВИГАТОР ===
+    if tab == 'navigator':
+        parts.append("📍 <b>ВКЛАДКА: НАВИГАТОР</b>\n")
         parts.append(get_health_status(envelopes))
         
-        # Calculate obligations and deficit
         expenses_obligations = sum(e.target_amount or 0 for e in expense_envs)
         debts_obligations = sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
         total_obligations = expenses_obligations + debts_obligations
@@ -415,7 +380,6 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
         total_funded = sum(e.current_amount for e in expense_envs) + unallocated_amount
         deficit = max(0.0, total_obligations - total_funded)
         
-        # Calculate tree block for ВАШИ ДЕНЬГИ
         total_in_envelopes = sum(e.current_amount for e in expense_envs) + sum(e.current_amount for e in envelopes if getattr(e, 'is_goal', False))
         total_money = total_in_envelopes + unallocated_amount
         
@@ -423,40 +387,127 @@ def build_dashboard(envelopes: list, monthly_income: float = 0.0) -> str:
             f"💰 <b>ВАШИ ДЕНЬГИ:</b> {fmt_money(total_money)}\n"
             f"├─ 🔒 <b>В конвертах:</b> {fmt_money(total_in_envelopes)} (обеспечено)\n"
             f"└─ 💸 <b>Свободный кэш:</b> {fmt_money(unallocated_amount)} ⚠️ (не распределен)\n"
-            f"<i>👉 Нажмите /allocate, чтобы разложить деньги по конвертам.</i>\n"
+            f"<i>👉 Напишите /allocate, чтобы разложить деньги по конвертам.</i>\n"
         )
         
         parts.append(
-            f"💳 <b>ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> {fmt_money(total_obligations)} "
-            f"(расходы {fmt_money(expenses_obligations)} + мин. платежи {fmt_money(debts_obligations)})\n"
-            f"🟢 <b>Обеспечено деньгами:</b> {fmt_money(total_funded)}\n"
-            f"🟡 <b>Не хватает:</b> {fmt_money(deficit)}\n"
+            f"💳 <b>ОБЯЗАТЕЛЬСТВА В ЭТОМ МЕСЯЦЕ:</b> {fmt_money(total_obligations)}\n"
+            f"├─ ✅ <b>Обеспечено:</b> {fmt_money(total_funded)}\n"
+            f"└─ 🚨 <b>Не хватает (дефицит):</b> {fmt_money(deficit)}\n"
         )
-        parts.append(get_financial_insight(envelopes, monthly_income=monthly_income) + "\n")
+        
+        insight = get_financial_insight(envelopes)
+        if insight:
+            parts.append(insight)
 
-    if expense_lines:
-        parts.append("🛍 <b>На расходы:</b>\n" + "\n".join(expense_lines))
-    
-    if buffer_env:
-        parts.append(f"\n🛡 <b>Буфер:</b> {fmt_money(buffer_env.current_amount)}")
-    else:
-        parts.append("\n🛡 <b>Буфер:</b> 0")
+    # === ВКЛАДКА 2: РАСХОДЫ ===
+    elif tab == 'expenses':
+        parts.append("📍 <b>ВКЛАДКА: РАСХОДЫ И ЛИМИТЫ</b>\n")
         
-    if goal_lines:
-        parts.append("\n🎯 <b>Цели:</b>\n" + "\n".join(goal_lines))
+        if expense_envs:
+            expense_lines = []
+            for e in expense_envs:
+                status_emoji = "✅" if e.current_amount >= (e.target_amount or 0) else "❌"
+                expense_lines.append(f"{status_emoji} {e.name}: доступно {fmt_money(e.current_amount)} (лимит {fmt_money(e.target_amount or 0)})")
+            parts.append("🛍 <b>Повседневные расходы:</b>\n" + "\n".join(expense_lines))
+            
+        if buffer_env:
+            parts.append(f"\n🛡 <b>Буфер (подушка):</b> {fmt_money(buffer_env.current_amount)}")
+        else:
+            parts.append("\n🛡 <b>Буфер (подушка):</b> 0")
+            
+        if goal_envs:
+            goal_lines = []
+            for e in goal_envs:
+                target_str = f" (цель {fmt_money(e.target_amount or 0)})" if (e.target_amount or 0) > 0 else ""
+                goal_lines.append(f"• {e.name}: накоплено {fmt_money(e.current_amount)}{target_str}")
+            parts.append("\n🎯 <b>Цели и накопления:</b>\n" + "\n".join(goal_lines))
+            
+        active_debts_with_min = [d for d in debt_envs if (d.min_payment or 0) > 0 and (d.target_amount or 0) - d.current_amount > 0]
+        if active_debts_with_min:
+            min_pay_lines = []
+            for d in active_debts_with_min:
+                paid_this_month = monthly_payments.get(d.id, 0.0) if monthly_payments else 0.0
+                paid_min = min(paid_this_month, d.min_payment)
+                status_emoji = "✅" if paid_min >= d.min_payment else "❌"
+                min_pay_lines.append(f"{status_emoji} {d.name} (мин. платёж): оплачено {fmt_money(paid_min)} из {fmt_money(d.min_payment)}")
+            parts.append("\n💳 <b>Обязательные платежи по кредитам:</b>\n" + "\n".join(min_pay_lines))
+
+    # === ВКЛАДКА 3: ДОЛГИ ===
+    elif tab == 'debts':
+        parts.append("📍 <b>ВКЛАДКА: ДОЛГОВЫЕ ОБЯЗАТЕЛЬСТВА</b>\n")
         
-    if credit_lines:
-        parts.append("\n💳 <b>Кредиты и карты:</b>\n" + "\n".join(credit_lines))
-        
-    if personal_lines:
-        parts.append("\n🤝 <b>Долги близким:</b>\n" + "\n".join(personal_lines))
-        
-    if len(envelopes) <= 1 and unallocated_amount > 0:
-        parts.append(f"\n💵 <b>Свободный кэш:</b> {fmt_money(unallocated_amount)}")
-        
-    if len(parts) == 1 and unallocated_amount == 0:
-        return "Твой бюджет пока пуст. Расскажи, сколько зарабатываешь, какие есть обязательные расходы и долги, и я составлю финансовый план! 🚀"
-        
+        active_credits = [d for d in debt_envs if (d.min_payment or 0) > 0 and (d.target_amount or 0) - d.current_amount > 0]
+        if active_credits:
+            credit_lines = []
+            for e in active_credits:
+                rem = (e.target_amount or 0) - e.current_amount
+                pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
+                min_pay_str = f", мин. платёж {fmt_money(e.min_payment)}"
+                credit_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}{min_pay_str}, погашено {pct}%)")
+            parts.append("🏦 <b>Банковские кредиты и карты:</b>\n" + "\n".join(credit_lines))
+            
+        active_personal = [d for d in debt_envs if (d.min_payment or 0) <= 0 and (d.target_amount or 0) - d.current_amount > 0]
+        if active_personal:
+            personal_lines = []
+            for e in active_personal:
+                rem = (e.target_amount or 0) - e.current_amount
+                pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
+                personal_lines.append(f"• {e.name}: осталось {fmt_money(rem)} (всего {fmt_money(e.target_amount or 0)}, погашено {pct}%)")
+            parts.append("\n🤝 <b>Долги близким:</b>\n" + "\n".join(personal_lines))
+            
+        all_active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
+        if not all_active_debts:
+            parts.append("🎉 <b>Поздравляем! У вас нет активных долгов.</b>")
+            
+        if monthly_income > 0:
+            forecast_section = "\n🔮 <b>Прогноз до конца месяца:</b>\n"
+            forecast = calculate_forecasts(envelopes, monthly_income)
+            if forecast["status"] == "ok":
+                free_cash = forecast["free_cash"]
+                total_debt_reduction = 0
+                if forecast.get("end_of_first_month_debts"):
+                    for d in forecast["end_of_first_month_debts"]:
+                        total_debt_reduction += (d["initial"] - d["remaining"])
+                
+                total_debt_start = sum((d.target_amount or 0) - d.current_amount for d in debt_envs)
+                total_debt_end = max(0.0, total_debt_start - total_debt_reduction)
+                
+                max_months = 0
+                if forecast.get("completed"):
+                    for d_name, months in forecast["completed"].items():
+                        target_env = next((env for env in envelopes if env.name == d_name), None)
+                        if target_env and getattr(target_env, 'is_debt', False):
+                            if months > max_months:
+                                max_months = months
+
+                forecast_lines = []
+                forecast_lines.append(f"├─ 🟢 <b>Хватит на всё?</b> Да, останется +{fmt_money(free_cash)}")
+                
+                if total_debt_start > 0:
+                    forecast_lines.append(f"├─ 📉 <b>Долги к след. месяцу:</b> {fmt_money(total_debt_end)} (снизятся на {fmt_money(total_debt_reduction)})")
+                    if max_months > 0:
+                        forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> {fmt_months_ru(max_months)}")
+                    else:
+                        forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
+                else:
+                    forecast_lines.append(f"└─ ⏳ <b>Свобода от долгов:</b> долгов нет 🎉")
+                    
+                forecast_section += "\n".join(forecast_lines)
+                
+            elif forecast["status"] == "negative_or_zero":
+                free_cash = forecast["free_cash"]
+                deficit_amt = -free_cash
+                forecast_lines = [
+                    f"├─ 🔴 <b>Хватит на всё?</b> Нет, дефицит -{fmt_money(deficit_amt)}",
+                    "├─ ⚠️ <b>Совет:</b> сократите необязательные расходы или временно не вносите досрочные платежи.",
+                    "└─ ⏳ <b>Свобода от долгов:</b> на паузе (требуется балансировка)"
+                ]
+                forecast_section += "\n".join(forecast_lines)
+            parts.append(forecast_section)
+        else:
+            parts.append("\n💡 <i>Задайте планируемый доход (например: «мой доход 120к»), чтобы построить прогноз.</i>")
+
     return "\n".join(parts)
 
 
@@ -501,13 +552,28 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
 
             if _is_dashboard_request(text):
                 session.add(ChatMessage(user_id=user.telegram_id, role="user", content=text))
-                dashboard = build_dashboard(envelopes, monthly_income=budget_owner.monthly_income or 0)
+                
+                text_clean = text.lower().strip()
+                tab = 'navigator'
+                if "расходы" in text_clean:
+                    tab = 'expenses'
+                elif "долги" in text_clean:
+                    tab = 'debts'
+                
+                envelope_ids = [e.id for e in envelopes]
+                monthly_payments = await get_monthly_payments(session, envelope_ids)
+                
+                dashboard = build_dashboard(
+                    envelopes, 
+                    monthly_income=budget_owner.monthly_income or 0,
+                    tab=tab,
+                    monthly_payments=monthly_payments
+                )
+                
                 session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=dashboard))
                 await session.commit()
-                reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-                    [InlineKeyboardButton(text="👥 Семейный бюджет", callback_data="family_menu")]
-                ])
-                await message.answer(dashboard, parse_mode="HTML", reply_markup=reply_markup)
+                
+                await message.answer(dashboard, parse_mode="HTML")
                 return
 
             loading_msgs = []
@@ -621,47 +687,66 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             )
 
                         expense_amount = abs(tx_data.amount)
-                        new_balance = target_env.current_amount - expense_amount
-
-                        if new_balance < 0:
-                            deficit = abs(new_balance)
+                        
+                        if getattr(target_env, 'is_debt', False):
+                            target_env.current_amount += expense_amount
+                            if target_env.target_amount and target_env.current_amount > target_env.target_amount:
+                                target_env.current_amount = target_env.target_amount
+                                
                             unallocated = _find_unallocated(envelopes)
-                            if unallocated and unallocated.current_amount > 0:
-                                transfer = min(unallocated.current_amount, deficit)
-                                unallocated.current_amount -= transfer
-                                target_env.current_amount += transfer
-                                remaining_deficit = deficit - transfer
-                                if remaining_deficit > 0:
-                                    extra_reply_parts.append(
-                                        f"⚠️ Статья <b>{target_env.name}</b> в минусе на {remaining_deficit:.0f} руб. "
-                                        f"Перенёс {transfer:.0f} руб из Нераспределённых."
-                                    )
+                            if unallocated:
+                                unallocated.current_amount = max(0.0, unallocated.current_amount - expense_amount)
+                                
+                            tx = Transaction(
+                                user_id=user.telegram_id,
+                                amount=expense_amount,
+                                envelope_id=target_env.id,
+                                description=tx_data.category or f"Оплата долга: {target_env.name}"
+                            )
+                            session.add(tx)
+                            
+                        else:
+                            new_balance = target_env.current_amount - expense_amount
+
+                            if new_balance < 0:
+                                deficit = abs(new_balance)
+                                unallocated = _find_unallocated(envelopes)
+                                if unallocated and unallocated.current_amount > 0:
+                                    transfer = min(unallocated.current_amount, deficit)
+                                    unallocated.current_amount -= transfer
+                                    target_env.current_amount += transfer
+                                    remaining_deficit = deficit - transfer
+                                    if remaining_deficit > 0:
+                                        extra_reply_parts.append(
+                                            f"⚠️ Статья <b>{target_env.name}</b> в минусе на {remaining_deficit:.0f} руб. "
+                                            f"Перенёс {transfer:.0f} руб из Нераспределённых."
+                                        )
+                                    else:
+                                        extra_reply_parts.append(
+                                            f"ℹ️ Перенёс {transfer:.0f} руб из Нераспределённых в <b>{target_env.name}</b>"
+                                        )
                                 else:
                                     extra_reply_parts.append(
-                                        f"ℹ️ Перенёс {transfer:.0f} руб из Нераспределённых в <b>{target_env.name}</b>"
+                                        f"🚨 Статья <b>{target_env.name}</b> в минусе ({new_balance:.0f} руб)! "
+                                        f"Свободных средств нет."
                                     )
-                            else:
-                                extra_reply_parts.append(
-                                    f"🚨 Статья <b>{target_env.name}</b> в минусе ({new_balance:.0f} руб)! "
-                                    f"Свободных средств нет."
-                                )
 
-                        target_env.current_amount -= expense_amount
+                            target_env.current_amount -= expense_amount
 
-                        if target_env.target_amount and target_env.target_amount > 0:
-                            pct = target_env.current_amount / target_env.target_amount * 100
-                            if pct < 20 and pct > 0:
-                                extra_reply_parts.append(
-                                    f"⚠️ В статье <b>{target_env.name}</b> осталось меньше 20% ({pct:.0f}%)"
-                                )
+                            if target_env.target_amount and target_env.target_amount > 0:
+                                pct = target_env.current_amount / target_env.target_amount * 100
+                                if pct < 20 and pct > 0:
+                                    extra_reply_parts.append(
+                                        f"⚠️ В статье <b>{target_env.name}</b> осталось меньше 20% ({pct:.0f}%)"
+                                    )
 
-                        tx = Transaction(
-                            user_id=user.telegram_id,
-                            amount=-expense_amount,
-                            envelope_id=target_env.id,
-                            description=tx_data.category or "Трата"
-                        )
-                        session.add(tx)
+                            tx = Transaction(
+                                user_id=user.telegram_id,
+                                amount=-expense_amount,
+                                envelope_id=target_env.id,
+                                description=tx_data.category or "Трата"
+                            )
+                            session.add(tx)
 
                     elif tx_data.action == "income":
                         # Guard: If we are already negotiating this income, don't add it again!
@@ -849,7 +934,17 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 await session.flush()
                 env_result2 = await session.execute(select(Envelope).where(Envelope.user_id == budget_owner.telegram_id))
                 fresh_envelopes = list(env_result2.scalars().all())
-                brain_response.coach_reply += "\n\n" + build_dashboard(fresh_envelopes, monthly_income=budget_owner.monthly_income or 0)
+                brain_response.coach_reply += "\n\n" + build_dashboard(fresh_envelopes, monthly_income=budget_owner.monthly_income or 0, tab='navigator')
+            elif brain_response.intent == "transaction" and brain_response.transactions:
+                await session.flush()
+                env_result2 = await session.execute(select(Envelope).where(Envelope.user_id == budget_owner.telegram_id))
+                fresh_envelopes = list(env_result2.scalars().all())
+                
+                envelope_ids = [e.id for e in fresh_envelopes]
+                monthly_payments = await get_monthly_payments(session, envelope_ids)
+                
+                micro_nav = build_micro_navigator(fresh_envelopes, brain_response.transactions, monthly_payments)
+                brain_response.coach_reply += "\n" + micro_nav
 
             session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=brain_response.coach_reply))
             await session.commit()
@@ -1062,19 +1157,24 @@ async def show_envelopes_callback(callback):
         )
         envelopes = list(env_result.scalars().all())
         monthly_income = budget_owner.monthly_income if budget_owner else 0.0
+        
+        envelope_ids = [e.id for e in envelopes]
+        monthly_payments = await get_monthly_payments(session, envelope_ids)
 
     if not envelopes:
         await callback.answer("Бюджет пока пуст")
         return
 
-    dashboard = build_dashboard(envelopes, monthly_income=monthly_income)
-    reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👥 Семейный бюджет", callback_data="family_menu")]
-    ])
+    dashboard = build_dashboard(
+        envelopes, 
+        monthly_income=monthly_income, 
+        tab='navigator', 
+        monthly_payments=monthly_payments
+    )
     try:
-        await callback.message.edit_text(dashboard, parse_mode="HTML", reply_markup=reply_markup)
+        await callback.message.edit_text(dashboard, parse_mode="HTML")
     except Exception:
-        await callback.message.answer(dashboard, parse_mode="HTML", reply_markup=reply_markup)
+        await callback.message.answer(dashboard, parse_mode="HTML")
 
 
 @router.message(F.text & ~F.text.startswith('/'))
