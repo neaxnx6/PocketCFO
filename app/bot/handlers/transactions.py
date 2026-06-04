@@ -709,6 +709,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 financial_health=financial_health,
                 chat_history=chat_history_api
             )
+            logger.info(f"LLM Response: {brain_response.model_dump_json() if hasattr(brain_response, 'model_dump_json') else brain_response}")
 
             existing_real_envs = [
                 e for e in envelopes
