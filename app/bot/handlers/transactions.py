@@ -733,7 +733,19 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
             extra_reply_parts = []
             show_envelopes_button = False
 
+            is_already_confirming = False
+            if state:
+                current_state_check = await state.get_state()
+                is_already_confirming = (current_state_check == IncomeStates.confirming.state)
+
             if brain_response.intent == "transaction" and brain_response.transactions:
+                if state and is_already_confirming:
+                    await state.clear()
+                    is_already_confirming = False
+
+                total_income_this_turn = 0.0
+                unallocated_env_id = None
+
                 for tx_data in brain_response.transactions:
                     if tx_data.action == "expense":
                         target_env = None
@@ -807,9 +819,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             session.add(tx)
 
                     elif tx_data.action == "income":
-                        # Guard: If we are already negotiating this income, don't add it again!
-                        current_state_check = await state.get_state() if state else None
-                        if current_state_check == IncomeStates.confirming.state:
+                        if is_already_confirming:
                             continue
 
                         unallocated = _find_unallocated(envelopes)
@@ -830,18 +840,23 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             description=tx_data.category or "Доход"
                         )
                         session.add(tx)
+                        
+                        total_income_this_turn += actual_amount
+                        unallocated_env_id = unallocated.id
 
-                        allocs = brain_response.income_allocations or brain_response.plan_items
-                        if allocs and state:
-                            alloc_names = [a.envelope_name if hasattr(a, 'envelope_name') else a.name for a in allocs]
-                            alloc_amounts = [a.amount for a in allocs]
-                            await state.set_state(IncomeStates.confirming)
-                            await state.set_data({
-                                "income_amount": actual_amount,
-                                "unallocated_env_id": unallocated.id,
-                                "alloc_names": alloc_names,
-                                "alloc_amounts": alloc_amounts
-                            })
+                # After processing all transactions, set up the confirming state if there was any income
+                if total_income_this_turn > 0:
+                    allocs = brain_response.income_allocations or brain_response.plan_items
+                    if allocs and state:
+                        alloc_names = [a.envelope_name if hasattr(a, 'envelope_name') else a.name for a in allocs]
+                        alloc_amounts = [a.amount for a in allocs]
+                        await state.set_state(IncomeStates.confirming)
+                        await state.set_data({
+                            "income_amount": total_income_this_turn,
+                            "unallocated_env_id": unallocated_env_id,
+                            "alloc_names": alloc_names,
+                            "alloc_amounts": alloc_amounts
+                        })
 
             elif brain_response.intent == "profile_update" and brain_response.envelopes_to_create:
                 # Guard: if user already has a real budget (non-trivial envelopes), 
