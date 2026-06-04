@@ -349,7 +349,8 @@ def build_micro_navigator(envelopes: list, transactions: list, monthly_payments:
             target_str = f" из <b>{fmt_money(env.target_amount)}</b>" if env.target_amount else ""
             lines.append(f"🎯 <b>«{env.name}»:</b> накоплено <b>{fmt_money(env.current_amount)}</b>{target_str}")
         else:
-            lines.append(f"🛍 <b>Лимит «{env.name}»:</b> осталось <b>{fmt_money(env.current_amount)}</b> из <b>{fmt_money(env.target_amount or 0)}</b>")
+            limit_str = f" из <b>{fmt_money(env.target_amount)}</b>" if env.target_amount else ""
+            lines.append(f"🛍 <b>Лимит «{env.name}»:</b> осталось <b>{fmt_money(env.current_amount)}</b>{limit_str}")
             
     return "\n📊 <b>Микро-Навигатор:</b>\n" + "\n".join(lines)
 
