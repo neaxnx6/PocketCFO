@@ -1,6 +1,7 @@
 from aiogram import Router, F, Bot
 from aiogram.filters import CommandStart, Command
 from aiogram.types import Message
+from aiogram.fsm.context import FSMContext
 from sqlalchemy.future import select
 from sqlalchemy import delete, update
 from app.database.session import async_session_maker
@@ -9,7 +10,9 @@ from app.database.models import User, Envelope, Transaction, ChatMessage
 router = Router()
 
 @router.message(Command("reset"))
-async def cmd_reset(message: Message, bot: Bot = None):
+async def cmd_reset(message: Message, state: FSMContext = None, bot: Bot = None):
+    if state:
+        await state.clear()
     async with async_session_maker() as session:
         # Find user first
         user_result = await session.execute(select(User).where(User.telegram_id == message.from_user.id))
@@ -63,7 +66,9 @@ async def cmd_reset(message: Message, bot: Bot = None):
     await message.answer("🧹 Все твои данные, конверты и история памяти полностью удалены! Напиши /start, чтобы начать с чистого листа.", reply_markup=persistent_keyboard)
 
 @router.message(CommandStart())
-async def cmd_start(message: Message):
+async def cmd_start(message: Message, state: FSMContext = None):
+    if state:
+        await state.clear()
     async with async_session_maker() as session:
         result = await session.execute(select(User).where(User.telegram_id == message.from_user.id))
         user = result.scalar_one_or_none()

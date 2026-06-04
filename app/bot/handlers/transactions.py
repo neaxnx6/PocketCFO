@@ -1083,21 +1083,22 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
 
         # Send final answer first to prevent visual gap
         await message.answer(safe_reply, parse_mode="HTML", reply_markup=reply_markup)
-        
-        # Clean up loading messages AFTER sending final answer
+
+    except Exception as e:
+        logger.error(f"Error processing transaction: {e}", exc_info=True)
+        await message.answer("Блин, не совсем понял. Можешь повторить подробнее?")
+
+    finally:
+        # Clean up loading messages AFTER sending final answer or on error
         if 'animation_task' in locals() and animation_task:
             animation_task.cancel()
             
-        if loading_msgs:
+        if 'loading_msgs' in locals() and loading_msgs:
             for msg in loading_msgs:
                 try:
                     await msg.delete()
                 except Exception:
                     pass
-
-    except Exception as e:
-        logger.error(f"Error processing transaction: {e}", exc_info=True)
-        await message.answer("Блин, не совсем понял. Можешь повторить подробнее?")
 
 
 @router.callback_query(F.data == "confirm_income", IncomeStates.confirming)
