@@ -326,12 +326,21 @@ def get_financial_insight(envelopes: list) -> str:
     return insight
 
 
-def build_micro_navigator(envelopes: list, transactions: list, monthly_payments: dict = None) -> str:
+def build_micro_navigator(
+    envelopes: list, 
+    transactions: list, 
+    monthly_payments: dict = None,
+    pending_allocation_amount: float = 0.0
+) -> str:
     lines = []
     
     unallocated = _find_unallocated(envelopes)
     unallocated_amt = unallocated.current_amount if unallocated else 0.0
-    lines.append(f"💰 <b>Свободный кэш:</b> <b>{fmt_money(unallocated_amt)}</b>")
+    if pending_allocation_amount > 0:
+        remaining = max(0.0, unallocated_amt - pending_allocation_amount)
+        lines.append(f"💰 <b>Свободный кэш:</b> <b>{fmt_money(unallocated_amt)}</b> (после распределения останется <b>{fmt_money(remaining)}</b>)")
+    else:
+        lines.append(f"💰 <b>Свободный кэш:</b> <b>{fmt_money(unallocated_amt)}</b>")
     
     for tx in transactions:
         if not tx.target_envelope_name:
@@ -1023,7 +1032,16 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 envelope_ids = [e.id for e in fresh_envelopes]
                 monthly_payments = await get_monthly_payments(session, envelope_ids)
                 
-                micro_nav = build_micro_navigator(fresh_envelopes, brain_response.transactions, monthly_payments)
+                pending_alloc_amt = 0.0
+                if brain_response.income_allocations:
+                    pending_alloc_amt = sum(a.amount for a in brain_response.income_allocations)
+                
+                micro_nav = build_micro_navigator(
+                    fresh_envelopes, 
+                    brain_response.transactions, 
+                    monthly_payments,
+                    pending_allocation_amount=pending_alloc_amt
+                )
                 brain_response.coach_reply += "\n" + micro_nav
 
             session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=brain_response.coach_reply))
