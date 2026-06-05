@@ -79,16 +79,20 @@ def _find_unallocated(envelopes: list):
     return None
 
 
-def build_envelopes_context(envelopes: list[Envelope]) -> str:
+def build_envelopes_context(envelopes: list[Envelope], monthly_payments: dict[int, float] = None) -> str:
     expense_lines = []
     goal_lines = []
     debt_lines = []
     for e in envelopes:
         if getattr(e, 'is_debt', False):
             remaining = (e.target_amount or 0) - e.current_amount
+            min_pay_str = ""
+            if e.min_payment:
+                paid_this_month = monthly_payments.get(e.id, 0.0) if monthly_payments else 0.0
+                min_pay_str = f", мин. платёж {e.min_payment:.0f} руб (внесено в этом месяце {paid_this_month:.0f} руб)"
             debt_lines.append(
                 f"- [ДОЛГ] '{e.name}': осталось вернуть {remaining:.0f} руб "
-                f"(оплачено {e.current_amount:.0f} из {e.target_amount or 0:.0f})"
+                f"(оплачено {e.current_amount:.0f} из {e.target_amount or 0:.0f}){min_pay_str}"
             )
         elif getattr(e, 'is_goal', False):
             goal_lines.append(
@@ -659,7 +663,9 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 phrases = ["Принял, анализирую", "Подбиваю цифры", "Формирую план", "Почти готово"]
                 animation_task = asyncio.create_task(animate_messages(message.chat.id, phrases))
 
-            env_context = build_envelopes_context(envelopes)
+            envelope_ids = [e.id for e in envelopes]
+            monthly_payments = await get_monthly_payments(session, envelope_ids)
+            env_context = build_envelopes_context(envelopes, monthly_payments)
             financial_health = build_financial_health(envelopes, monthly_income=budget_owner.monthly_income or 0)
 
             chat_result = await session.execute(
