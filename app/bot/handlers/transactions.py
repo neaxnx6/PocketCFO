@@ -410,7 +410,7 @@ def build_dashboard(
         total_funded = sum(e.current_amount for e in expense_envs) + unallocated_amount
         deficit = max(0.0, total_obligations - total_funded)
         
-        total_in_envelopes = sum(e.current_amount for e in expense_envs) + sum(e.current_amount for e in envelopes if getattr(e, 'is_goal', False))
+        total_in_envelopes = sum(e.current_amount for e in expense_envs) + sum(e.current_amount for e in goal_envs)
         buffer_amount = buffer_env.current_amount if buffer_env else 0.0
         total_money = total_in_envelopes + unallocated_amount + buffer_amount
         
