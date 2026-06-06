@@ -1147,6 +1147,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                          ("<ul>", ""), ("</ul>", ""), ("<ol>", ""), ("</ol>", ""),
                          ("<li>", "• "), ("</li>", "\n")]:
             safe_reply = safe_reply.replace(old, new)
+        safe_reply = safe_reply.replace("Дашборд", "Навигатор").replace("дашборд", "навигатор")
 
         is_profile_update = brain_response.intent == "profile_update"
         allocs = brain_response.income_allocations or (brain_response.plan_items if not is_profile_update else None)
