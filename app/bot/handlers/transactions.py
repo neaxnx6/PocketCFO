@@ -862,17 +862,22 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
 
                 # After processing all transactions, set up the confirming state if there was any income
                 if total_income_this_turn > 0:
-                    allocs = brain_response.income_allocations or brain_response.plan_items
-                    if allocs and state:
-                        alloc_names = [a.envelope_name if hasattr(a, 'envelope_name') else a.name for a in allocs]
-                        alloc_amounts = [a.amount for a in allocs]
-                        await state.set_state(IncomeStates.confirming)
-                        await state.set_data({
-                            "income_amount": total_income_this_turn,
-                            "unallocated_env_id": unallocated_env_id,
-                            "alloc_names": alloc_names,
-                            "alloc_amounts": alloc_amounts
-                        })
+                    if total_income_this_turn < 3000:
+                        # Clear allocations to prevent small income confirmation flows
+                        brain_response.income_allocations = None
+                        brain_response.plan_items = None
+                    else:
+                        allocs = brain_response.income_allocations or brain_response.plan_items
+                        if allocs and state:
+                            alloc_names = [a.envelope_name if hasattr(a, 'envelope_name') else a.name for a in allocs]
+                            alloc_amounts = [a.amount for a in allocs]
+                            await state.set_state(IncomeStates.confirming)
+                            await state.set_data({
+                                "income_amount": total_income_this_turn,
+                                "unallocated_env_id": unallocated_env_id,
+                                "alloc_names": alloc_names,
+                                "alloc_amounts": alloc_amounts
+                            })
 
             elif brain_response.intent == "profile_update" and brain_response.envelopes_to_create:
                 # Guard: if user already has a real budget (non-trivial envelopes), 
@@ -1110,8 +1115,8 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
         has_allocs = brain_response.income_allocations or (brain_response.plan_items and not is_profile_update)
         if has_allocs and not is_profile_update:
             reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Подтверждаю", callback_data="confirm_income")],
-                [InlineKeyboardButton(text="❌ Оставить в Нераспределённых", callback_data="reject_income")]
+                [InlineKeyboardButton(text="✅ Да, применить", callback_data="confirm_income")],
+                [InlineKeyboardButton(text="❌ Оставить в нераспределенных", callback_data="reject_income")]
             ])
         elif force_dashboard:
             reply_markup = InlineKeyboardMarkup(inline_keyboard=[
