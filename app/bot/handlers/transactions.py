@@ -4,7 +4,7 @@ from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.future import select
-from sqlalchemy import func
+from sqlalchemy import func, delete
 
 from app.database.session import async_session_maker
 from app.database.models import User, Transaction, Envelope, ChatMessage
@@ -46,6 +46,63 @@ def _is_dashboard_request(text: str) -> bool:
 
 class IncomeStates(StatesGroup):
     confirming = State()
+
+
+async def verify_user_ledger(session, user_id: int) -> bool:
+    """
+    Enforce database consistency invariants:
+    1. Sum of all envelopes (current_amount) == Sum of all transactions (amount)
+    2. Sum of transactions for each envelope == envelope.current_amount
+    Returns True if ledger is consistent, False otherwise.
+    """
+    try:
+        await session.flush()
+        result_envs = await session.execute(select(Envelope).where(Envelope.user_id == user_id))
+        envelopes = list(result_envs.scalars().all())
+        
+        env_ids = [e.id for e in envelopes]
+        if not env_ids:
+            return True
+            
+        result_txs = await session.execute(
+            select(Transaction).where(
+                (Transaction.user_id == user_id) | Transaction.envelope_id.in_(env_ids)
+            )
+        )
+        transactions = list(result_txs.scalars().all())
+        
+        sum_envelopes = sum(e.current_amount for e in envelopes)
+        
+        # Deduplicate transactions if any overlap in filters
+        seen_tx_ids = set()
+        unique_transactions = []
+        for t in transactions:
+            if t.id not in seen_tx_ids:
+                seen_tx_ids.add(t.id)
+                unique_transactions.append(t)
+                
+        sum_transactions = sum(t.amount for t in unique_transactions)
+        
+        if abs(sum_envelopes - sum_transactions) > 0.01:
+            logger.error(
+                f"Ledger invariant violation for user {user_id}: "
+                f"envelopes sum = {sum_envelopes:.2f}, transactions sum = {sum_transactions:.2f}"
+            )
+            return False
+            
+        for env in envelopes:
+            env_tx_sum = sum(t.amount for t in unique_transactions if t.envelope_id == env.id)
+            if abs(env.current_amount - env_tx_sum) > 0.01:
+                logger.error(
+                    f"Envelope balance drift for user {user_id}, envelope '{env.name}' (id={env.id}): "
+                    f"current_amount = {env.current_amount:.2f}, transactions sum = {env_tx_sum:.2f}"
+                )
+                return False
+                
+        return True
+    except Exception as e:
+        logger.error(f"Error during ledger verification: {e}", exc_info=True)
+        return False
 
 
 def _normalize_name(name: str) -> str:
@@ -775,17 +832,28 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                         expense_amount = abs(tx_data.amount)
                         
                         if getattr(target_env, 'is_debt', False):
+                            old_current = target_env.current_amount
                             target_env.current_amount += expense_amount
                             if target_env.target_amount and target_env.current_amount > target_env.target_amount:
                                 target_env.current_amount = target_env.target_amount
                                 
+                            actual_paid = target_env.current_amount - old_current
+                            
                             unallocated = _find_unallocated(envelopes)
                             if unallocated:
-                                unallocated.current_amount = max(0.0, unallocated.current_amount - expense_amount)
+                                unallocated.current_amount -= actual_paid
+                                # Double-entry: write negative transaction on unallocated
+                                tx_unallocated = Transaction(
+                                    user_id=user.telegram_id,
+                                    amount=-actual_paid,
+                                    envelope_id=unallocated.id,
+                                    description=f"Списание на долг: {target_env.name}"
+                                )
+                                session.add(tx_unallocated)
                                 
                             tx = Transaction(
                                 user_id=user.telegram_id,
-                                amount=expense_amount,
+                                amount=actual_paid,
                                 envelope_id=target_env.id,
                                 description=tx_data.category or f"Оплата долга: {target_env.name}"
                             )
@@ -801,6 +869,23 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                                     transfer = min(unallocated.current_amount, deficit)
                                     unallocated.current_amount -= transfer
                                     target_env.current_amount += transfer
+                                    
+                                    # Double-entry: write transfer transactions
+                                    tx_transfer_from = Transaction(
+                                        user_id=user.telegram_id,
+                                        amount=-transfer,
+                                        envelope_id=unallocated.id,
+                                        description=f"Перенос покрытия овердрафта: {target_env.name}"
+                                    )
+                                    tx_transfer_to = Transaction(
+                                        user_id=user.telegram_id,
+                                        amount=transfer,
+                                        envelope_id=target_env.id,
+                                        description=f"Покрытие овердрафта из Нераспределённых"
+                                    )
+                                    session.add(tx_transfer_from)
+                                    session.add(tx_transfer_to)
+                                    
                                     remaining_deficit = deficit - transfer
                                     if remaining_deficit > 0:
                                         extra_reply_parts.append(
@@ -899,23 +984,22 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                                 user_id=budget_owner.telegram_id,
                                 name=env_data.name,
                                 target_amount=env_data.target_amount,
-                                current_amount=env_data.current_amount,
+                                current_amount=0.0,
                                 is_debt=env_data.is_debt,
                                 is_goal=env_data.is_goal,
                                 min_payment=env_data.min_payment
                             )
                             session.add(new_env)
                             envelopes.append(new_env)
-                        # Existing envelopes are NOT touched — protect existing state
                     await session.flush()
                 else:
-                    # First-time setup — allow full creation
+                    # First-time setup — allow full creation (forced current_amount = 0.0)
                     affected_envs = []
                     for env_data in brain_response.envelopes_to_create:
                         existing = _find_envelope(envelopes, env_data.name)
                         if existing:
                             existing.target_amount = env_data.target_amount
-                            existing.current_amount = env_data.current_amount
+                            existing.current_amount = 0.0
                             existing.is_debt = env_data.is_debt
                             existing.is_goal = env_data.is_goal
                             existing.min_payment = env_data.min_payment
@@ -925,7 +1009,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                                 user_id=budget_owner.telegram_id,
                                 name=env_data.name,
                                 target_amount=env_data.target_amount,
-                                current_amount=env_data.current_amount,
+                                current_amount=0.0,
                                 is_debt=env_data.is_debt,
                                 is_goal=env_data.is_goal,
                                 min_payment=env_data.min_payment
@@ -943,7 +1027,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 unallocated = _find_unallocated(envelopes)
                 if not unallocated:
                     unallocated = Envelope(
-                        user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0
+                        user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0.0
                     )
                     session.add(unallocated)
                     await session.flush()
@@ -951,41 +1035,43 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 
                 # Идемпотентность: перезаписываем кэш, а не прибавляем!
                 if brain_response.free_cash is not None:
-                    unallocated.current_amount = brain_response.free_cash
-
-                if getattr(brain_response, 'plan_items', None):
-                    for pi in brain_response.plan_items:
-                        amount = pi.amount
-                        if amount <= 0 or unallocated.current_amount < amount:
-                            continue
-                            
-                        target = _find_envelope(envelopes, pi.name)
-                        if not target:
-                            # Auto-create missing goal/debt
-                            is_debt = "долг" in pi.name.lower() or "кредит" in pi.name.lower()
-                            is_goal = not is_debt # Treat unknown as goals
-                            target = Envelope(
-                                user_id=budget_owner.telegram_id,
-                                name=pi.name,
-                                target_amount=amount, # rough estimate
-                                current_amount=0,
-                                is_debt=is_debt,
-                                is_goal=is_goal
-                            )
-                            session.add(target)
-                            await session.flush()
-                            envelopes.append(target)
-                            
-                        if getattr(target, 'is_debt', False) or getattr(target, 'is_goal', False):
-                            target.current_amount += amount
-                            unallocated.current_amount -= amount
+                    if is_first_setup:
+                        await session.execute(delete(Transaction).where(Transaction.user_id == budget_owner.telegram_id))
+                        await session.flush()
+                        unallocated.current_amount = brain_response.free_cash
+                        if brain_response.free_cash > 0:
                             tx = Transaction(
-                                user_id=user.telegram_id,
-                                amount=amount,
-                                envelope_id=target.id,
-                                description=f"Стартовое распределение: {pi.name}"
+                                user_id=budget_owner.telegram_id,
+                                amount=brain_response.free_cash,
+                                envelope_id=unallocated.id,
+                                description="Стартовый капитал"
                             )
                             session.add(tx)
+                    else:
+                        diff = brain_response.free_cash - unallocated.current_amount
+                        if abs(diff) > 0.01:
+                            unallocated.current_amount = brain_response.free_cash
+                            tx = Transaction(
+                                user_id=budget_owner.telegram_id,
+                                amount=diff,
+                                envelope_id=unallocated.id,
+                                description="Корректировка баланса при обновлении профиля"
+                            )
+                            session.add(tx)
+
+                if getattr(brain_response, 'plan_items', None) and state:
+                    allocs = brain_response.plan_items
+                    alloc_names = [a.envelope_name if hasattr(a, 'envelope_name') else a.name for a in allocs]
+                    alloc_amounts = [a.amount for a in allocs]
+                    
+                    # Store in FSMContext
+                    await state.set_state(IncomeStates.confirming)
+                    await state.set_data({
+                        "income_amount": brain_response.free_cash or 0.0,
+                        "unallocated_env_id": unallocated.id,
+                        "alloc_names": alloc_names,
+                        "alloc_amounts": alloc_amounts
+                    })
                             
                 env_count = len([e for e in envelopes if e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")])
                 brain_response.coach_reply += f"\n\n📊 Бюджет сформирован ({env_count} категорий)"
@@ -1050,6 +1136,9 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 brain_response.coach_reply += "\n" + micro_nav
 
             session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=brain_response.coach_reply))
+            if not await verify_user_ledger(session, budget_owner.telegram_id):
+                await session.rollback()
+                raise ValueError("Ledger invariant violated!")
             await session.commit()
 
         safe_reply = brain_response.coach_reply
@@ -1081,6 +1170,9 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             description="Доход (авто-возобновление)"
                         )
                         session.add(tx)
+                        if not await verify_user_ledger(session, budget_owner.telegram_id):
+                            await session.rollback()
+                            raise ValueError("Ledger invariant violated!")
                         await session.commit()
                     
                     await state.set_state(IncomeStates.confirming)
@@ -1112,8 +1204,13 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
 
         reply_markup = None
         is_profile_update = brain_response.intent == "profile_update"
-        has_allocs = brain_response.income_allocations or (brain_response.plan_items and not is_profile_update)
-        if has_allocs and not is_profile_update:
+        has_allocs = False
+        if is_profile_update:
+            has_allocs = bool(brain_response.plan_items and brain_response.free_cash and brain_response.free_cash > 0)
+        else:
+            has_allocs = bool(brain_response.income_allocations or brain_response.plan_items)
+            
+        if has_allocs:
             reply_markup = InlineKeyboardMarkup(inline_keyboard=[
                 [InlineKeyboardButton(text="✅ Да, применить", callback_data="confirm_income")],
                 [InlineKeyboardButton(text="❌ Оставить в нераспределенных", callback_data="reject_income")]
@@ -1155,80 +1252,103 @@ async def confirm_income(callback, state: FSMContext):
     alloc_names = data.get("alloc_names", [])
     alloc_amounts = data.get("alloc_amounts", [])
 
-    async with async_session_maker() as session:
-        user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        user = user_result.scalar_one_or_none()
-        
-        budget_owner = user
-        if user and user.family_host_id:
-            host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
-            host = host_result.scalar_one_or_none()
-            if host:
-                budget_owner = host
-            else:
-                user.family_host_id = None
-                await session.flush()
+    try:
+        async with async_session_maker() as session:
+            user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+            user = user_result.scalar_one_or_none()
+            
+            budget_owner = user
+            if user and user.family_host_id:
+                host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+                host = host_result.scalar_one_or_none()
+                if host:
+                    budget_owner = host
+                else:
+                    user.family_host_id = None
+                    await session.flush()
 
-        result = await session.execute(select(Envelope).where(Envelope.id == unallocated_env_id))
-        unallocated = result.scalar_one_or_none()
+            result = await session.execute(select(Envelope).where(Envelope.id == unallocated_env_id))
+            unallocated = result.scalar_one_or_none()
 
-        if not unallocated:
-            await callback.message.answer("Счет не найден. Деньги остались в Нераспределённых.")
-            await state.clear()
-            return
+            if not unallocated:
+                await callback.message.answer("Счет не найден. Деньги остались в Нераспределённых.")
+                await state.clear()
+                return
 
-        distribution_text_parts = []
-        for name, amount in zip(alloc_names, alloc_amounts):
-            if amount <= 0:
-                continue
-            env_result = await session.execute(
-                select(Envelope).where(
-                    Envelope.user_id == budget_owner.telegram_id,
-                    Envelope.name.ilike(name.strip())
+            distribution_text_parts = []
+            for name, amount in zip(alloc_names, alloc_amounts):
+                if amount <= 0:
+                    continue
+                env_result = await session.execute(
+                    select(Envelope).where(
+                        Envelope.user_id == budget_owner.telegram_id,
+                        Envelope.name.ilike(name.strip())
+                    )
                 )
-            )
-            target_env = env_result.scalar_one_or_none()
+                target_env = env_result.scalar_one_or_none()
 
-            if not target_env:
-                is_debt = "долг" in name.lower() or "кредит" in name.lower()
-                is_goal = any(w in name.lower() for w in ["отпуск", "подушка", "накоп", "на ", "цель"])
-                target_env = Envelope(
-                    user_id=budget_owner.telegram_id,
-                    name=name,
-                    current_amount=0,
-                    is_debt=is_debt,
-                    is_goal=is_goal
+                if not target_env:
+                    is_debt = "долг" in name.lower() or "кредит" in name.lower()
+                    is_goal = any(w in name.lower() for w in ["отпуск", "подушка", "накоп", "на ", "цель"])
+                    target_env = Envelope(
+                        user_id=budget_owner.telegram_id,
+                        name=name,
+                        current_amount=0,
+                        is_debt=is_debt,
+                        is_goal=is_goal
+                    )
+                    if is_debt:
+                        target_env.target_amount = amount
+                    session.add(target_env)
+                    await session.flush()
+
+                # Cap each payment to what's actually available
+                transfer_amount = min(amount, max(0.0, unallocated.current_amount))
+                if getattr(target_env, 'is_debt', False) and target_env.target_amount:
+                    remaining_debt = target_env.target_amount - target_env.current_amount
+                    if transfer_amount > remaining_debt:
+                        transfer_amount = max(0.0, remaining_debt)
+                
+                if transfer_amount <= 0:
+                    continue
+
+                unallocated.current_amount -= transfer_amount
+                target_env.current_amount += transfer_amount
+
+                # Double-entry transactions
+                tx_from = Transaction(
+                    user_id=callback.from_user.id,
+                    amount=-transfer_amount,
+                    envelope_id=unallocated.id,
+                    description=f"Распределение: {target_env.name}"
                 )
-                if is_debt:
-                    target_env.target_amount = amount
-                session.add(target_env)
-                await session.flush()
+                tx_to = Transaction(
+                    user_id=callback.from_user.id,
+                    amount=transfer_amount,
+                    envelope_id=target_env.id,
+                    description=f"Распределение дохода: {name}"
+                )
+                session.add(tx_from)
+                session.add(tx_to)
+                distribution_text_parts.append(f"• {fmt_money(transfer_amount)} → {name}")
 
-            # Cap each payment to what's actually available
-            target_env.current_amount += amount
-            # For debt envelopes, don't overpay beyond remaining balance
-            if getattr(target_env, 'is_debt', False) and target_env.target_amount:
-                overpaid = target_env.current_amount - target_env.target_amount
-                if overpaid > 0:
-                    amount -= overpaid
-                    target_env.current_amount = target_env.target_amount
-            safe_deduction = min(amount, max(0, unallocated.current_amount))
-            unallocated.current_amount -= safe_deduction
+            if not await verify_user_ledger(session, budget_owner.telegram_id):
+                await session.rollback()
+                logger.error(f"Ledger verification failed in confirm_income for user {budget_owner.telegram_id}")
+                await callback.message.answer("⚠️ Ошибка проверки баланса. Пожалуйста, обратитесь в поддержку.")
+                await state.clear()
+                return
 
-            tx = Transaction(
-                user_id=callback.from_user.id,
-                amount=amount,
-                envelope_id=target_env.id,
-                description=f"Распределение дохода: {name}"
-            )
-            session.add(tx)
-            distribution_text_parts.append(f"• {fmt_money(amount)} → {name}")
+            await session.commit()
 
-        await session.commit()
+        reply = f"✅ <b>Распределил {fmt_money(income_amount)}:</b>\n" + "\n".join(distribution_text_parts)
+        await callback.message.edit_text(reply, parse_mode="HTML")
+        await state.clear()
 
-    reply = f"✅ <b>Распределил {fmt_money(income_amount)}:</b>\n" + "\n".join(distribution_text_parts)
-    await callback.message.edit_text(reply, parse_mode="HTML")
-    await state.clear()
+    except Exception as e:
+        logger.error(f"Error in confirm_income: {e}", exc_info=True)
+        await callback.message.answer("Что-то пошло не так при распределении. Попробуй ещё раз.")
+        await state.clear()
 
 
 @router.callback_query(F.data == "reject_income", IncomeStates.confirming)
