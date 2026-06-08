@@ -39,9 +39,8 @@ def test_build_dashboard_expenses():
     monthly_payments = {2: 2000.0}
     result = build_dashboard(envelopes, monthly_income=70000, tab='expenses', monthly_payments=monthly_payments)
     assert "ВКЛАДКА: РАСХОДЫ" in result
-    assert "🏠 Дом" in result
-    assert "Аренда: доступно <b>35к</b>" in result
-    assert "Кредитка (мин. платёж): оплачено <b>2к</b> из <b>5к</b>" in result
+    assert "🏠 Жилье: доступно <b>35к</b> из <b>35к</b>" in result
+    assert "Кредитка (обязательный платеж): оплачено <b>2к</b> из <b>5к</b>" in result
 
 def test_build_dashboard_debts():
     envelopes = [

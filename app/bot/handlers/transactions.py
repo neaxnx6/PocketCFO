@@ -1,6 +1,6 @@
 import logging
 from aiogram import Router, F, Bot
-from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from aiogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from sqlalchemy.future import select
@@ -115,6 +115,29 @@ def _normalize_name(name: str) -> str:
     return name.strip()
 
 
+CANONICAL_ENVELOPE_MAPPING = {
+    # Жилье
+    "аренда": "Жилье", "коммуналка": "Жилье", "интернет": "Жилье", "связь": "Жилье", 
+    "жкх": "Жилье", "жилье": "Жилье", "жильё": "Жилье", "квартира": "Жилье", "дом": "Жилье",
+    "электричество": "Жилье", "отопление": "Жилье", "вода": "Жилье", "телефон": "Жилье",
+    "мобильный": "Жилье", "жк": "Жилье",
+    
+    # Еда
+    "продукты": "Еда", "еда": "Еда", "супермаркет": "Еда", "кафе": "Еда", "ресторан": "Еда", 
+    "доставка": "Еда", "фастфуд": "Еда", "кофе": "Еда", "кофейня": "Еда",
+    
+    # Транспорт
+    "машина": "Транспорт", "бензин": "Транспорт", "такси": "Транспорт", "проезд": "Транспорт", 
+    "метро": "Транспорт", "каршеринг": "Транспорт", "автобус": "Транспорт", "поезд": "Транспорт", 
+    "парковка": "Транспорт", "авто": "Транспорт", "топливо": "Транспорт",
+    
+    # Личное
+    "одежда": "Личное", "красота": "Личное", "хобби": "Личное", "развлечения": "Личное", 
+    "подарки": "Личное", "спорт": "Личное", "здоровье": "Личное", "аптека": "Личное", 
+    "кино": "Личное", "шопинг": "Личное", "косметика": "Личное", "подписка": "Личное", "салон": "Личное"
+}
+
+
 def _find_envelope(envelopes: list, name: str):
     name_normalized = _normalize_name(name)
     # First try exact match with normalization
@@ -126,6 +149,13 @@ def _find_envelope(envelopes: list, name: str):
         env_norm = _normalize_name(env.name)
         if name_normalized in env_norm or env_norm in name_normalized:
             return env
+    # Then try canonical mapping (synonyms)
+    canonical = CANONICAL_ENVELOPE_MAPPING.get(name_normalized)
+    if canonical:
+        canonical_norm = _normalize_name(canonical)
+        for env in envelopes:
+            if _normalize_name(env.name) == canonical_norm:
+                return env
     return None
 
 
@@ -336,13 +366,26 @@ def fmt_months_ru(n: int) -> str:
 
 def get_envelope_group(name: str) -> str:
     n = name.lower()
-    if any(k in n for k in ("аренда", "коммуналка", "интернет", "связь", "жкх", "жильё", "жилье", "квартира", "дом")):
-        if "кабинет" in n or "офис" in n:
-            return "🧩 Прочее"
-        return "🏠 Дом"
-    if any(k in n for k in ("продукты", "еда", "кафе", "ресторан", "топливо", "проезд", "бензин", "транспорт", "такси", "одежда", "жизнь")):
-        return "🍔 Жизнь"
-    return "🧩 Прочее"
+    # 🏠 Жилье: аренда, коммуналка, интернет, связь, жкх, жилье, квартира, дом, жк, электричество, отопление, вода, газ
+    if any(k in n for k in ("аренда", "коммуналка", "интернет", "связь", "жкх", "жильё", "жилье", "квартира", "дом", "жк", "электричеств", "отоплен", "телефон", "мобильн", "провайдер")):
+        if "офис" in n or "кабинет" in n:
+            return "📦 Прочее"
+        return "🏠 Жилье"
+        
+    # 🍔 Еда: еда, продукты, кафе, ресторан, доставка, фастфуд, супермаркет, макдональдс, пицца, суши, кофейня, кофе
+    if any(k in n for k in ("еда", "продукты", "кафе", "ресторан", "доставка", "фастфуд", "супермаркет", "пицца", "суши", "кофе")):
+        return "🍔 Еда"
+        
+    # 🚗 Транспорт: машина, бензин, такси, проезд, метро, каршеринг, автобус, поезд, парковка, авто, топливо, гараж
+    if any(k in n for k in ("машина", "бензин", "такси", "проезд", "метро", "каршеринг", "автобус", "поезд", "парковка", "авто", "топливо", "гараж")):
+        return "🚗 Транспорт"
+        
+    # ❤️ Личное: одежда, красота, хобби, развлечения, подарки, спорт, здоровье, аптека, кино, шоппинг, шопинг, косметика, подписка, книга
+    if any(k in n for k in ("одежда", "красота", "хобби", "развлеч", "подарки", "спорт", "здоровье", "аптека", "кино", "шопинг", "шоппинг", "косметик", "подписк", "книг", "личное", "салон")):
+        return "❤️ Личное"
+        
+    # 📦 Прочее: default
+    return "📦 Прочее"
 
 
 def get_financial_insight(envelopes: list) -> str:
@@ -496,27 +539,25 @@ def build_dashboard(
         
         if expense_envs:
             groups = {
-                "🏠 Дом": [],
-                "🍔 Жизнь": [],
-                "🧩 Прочее": []
+                "🏠 Жилье": [],
+                "🍔 Еда": [],
+                "🚗 Транспорт": [],
+                "❤️ Личное": [],
+                "📦 Прочее": []
             }
             for e in expense_envs:
                 grp = get_envelope_group(e.name)
                 groups[grp].append(e)
                 
-            parts.append("🛍 <b>Расходы:</b>")
+            parts.append("🛍 <b>Расходы по категориям:</b>")
             for grp_name, envs in groups.items():
                 if not envs:
                     continue
-                lines = []
-                grp_available = 0.0
-                grp_limit = 0.0
-                for e in envs:
-                    lines.append(f"• {e.name}: доступно <b>{fmt_money(e.current_amount)}</b> (лимит <b>{fmt_money(e.target_amount or 0)}</b>)")
-                    grp_available += e.current_amount
-                    grp_limit += e.target_amount or 0.0
+                grp_available = sum(e.current_amount for e in envs)
+                grp_limit = sum(e.target_amount or 0.0 for e in envs)
                 
-                parts.append(f"\n{grp_name} (всего <b>{fmt_money(grp_available)}</b> из <b>{fmt_money(grp_limit)}</b>):\n" + "\n".join(lines))
+                limit_str = f" из <b>{fmt_money(grp_limit)}</b>" if grp_limit > 0 else ""
+                parts.append(f"• {grp_name}: доступно <b>{fmt_money(grp_available)}</b>{limit_str}")
             
         if goal_envs:
             goal_lines = []
@@ -531,7 +572,7 @@ def build_dashboard(
             for d in active_debts_with_min:
                 paid_this_month = monthly_payments.get(d.id, 0.0) if monthly_payments else 0.0
                 paid_min = min(paid_this_month, d.min_payment)
-                min_pay_lines.append(f"• {d.name} (мин. платёж): оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(d.min_payment)}</b>")
+                min_pay_lines.append(f"• {d.name} (обязательный платеж): оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(d.min_payment)}</b>")
             parts.append("\n💳 <b>Обязательные платежи по кредитам:</b>\n" + "\n".join(min_pay_lines))
 
     # === ВКЛАДКА 3: ДОЛГИ ===
@@ -683,6 +724,37 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                     reply_markup = InlineKeyboardMarkup(inline_keyboard=[
                         [InlineKeyboardButton(text=f"📥 Распределить {fmt_money(unallocated_amount)}", callback_data="start_allocation")]
                     ])
+                elif tab == 'expenses':
+                    expense_envs = [
+                        e for e in envelopes 
+                        if not getattr(e, 'is_debt', False) 
+                        and not getattr(e, 'is_goal', False) 
+                        and "буфер" not in e.name.lower()
+                        and e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")
+                    ]
+                    if expense_envs:
+                        groups = {
+                            "🏠 Жилье": [],
+                            "🍔 Еда": [],
+                            "🚗 Транспорт": [],
+                            "❤️ Личное": [],
+                            "📦 Прочее": []
+                        }
+                        for e in expense_envs:
+                            grp = get_envelope_group(e.name)
+                            groups[grp].append(e)
+                            
+                        keyboard_buttons = []
+                        row = []
+                        for grp_name, envs in groups.items():
+                            if envs:
+                                row.append(InlineKeyboardButton(text=f"🔍 {grp_name}", callback_data=f"detail_grp:{grp_name}"))
+                                if len(row) == 2:
+                                    keyboard_buttons.append(row)
+                                    row = []
+                        if row:
+                            keyboard_buttons.append(row)
+                        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
                 
                 await message.answer(dashboard, parse_mode="HTML", reply_markup=reply_markup)
                 return
@@ -824,10 +896,45 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                         target_env = None
                         if tx_data.target_envelope_name:
                             target_env = _find_envelope(envelopes, tx_data.target_envelope_name)
+                        
+                        if not target_env and tx_data.target_envelope_name:
+                            raw_name = tx_data.target_envelope_name
+                            normalized_raw = _normalize_name(raw_name)
+                            canonical_name = CANONICAL_ENVELOPE_MAPPING.get(normalized_raw)
+                            
+                            envelope_name = canonical_name if canonical_name else raw_name
+                            target_env = _find_envelope(envelopes, envelope_name)
+                            
+                            if not target_env:
+                                is_debt = "долг" in envelope_name.lower() or "кредит" in envelope_name.lower()
+                                is_goal = any(w in envelope_name.lower() for w in ["отпуск", "подушка", "накоп", "на ", "цель"])
+                                target_env = Envelope(
+                                    user_id=budget_owner.telegram_id,
+                                    name=envelope_name,
+                                    current_amount=0.0,
+                                    target_amount=0.0,
+                                    is_debt=is_debt,
+                                    is_goal=is_goal
+                                )
+                                session.add(target_env)
+                                await session.flush()
+                                envelopes.append(target_env)
+                                
+                                if not is_debt and not is_goal:
+                                    extra_reply_parts.append(
+                                        f"🛍 Создал статью <b>«{envelope_name}»</b> с лимитом 0. "
+                                        f"Если хочешь установить лимит, просто напиши: <i>«лимит на {envelope_name.lower()} 10к»</i>"
+                                    )
+                                    
                         if not target_env:
-                            target_env = envelopes[0] if envelopes else Envelope(
-                                user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0
-                            )
+                            target_env = _find_unallocated(envelopes)
+                            if not target_env:
+                                target_env = Envelope(
+                                    user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0.0
+                                )
+                                session.add(target_env)
+                                await session.flush()
+                                envelopes.append(target_env)
 
                         expense_amount = abs(tx_data.amount)
                         
@@ -1359,6 +1466,125 @@ async def reject_income(callback, state: FSMContext):
         parse_mode="HTML"
     )
     await state.clear()
+
+
+@router.callback_query(F.data.startswith("detail_grp:"))
+async def show_group_details(callback: CallbackQuery):
+    grp_name = callback.data.split(":", 1)[1]
+    
+    async with async_session_maker() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        user = user_result.scalar_one_or_none()
+        
+        budget_owner = user
+        if user and user.family_host_id:
+            host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+            host = host_result.scalar_one_or_none()
+            if host:
+                budget_owner = host
+            else:
+                user.family_host_id = None
+                await session.flush()
+                
+        env_result = await session.execute(select(Envelope).where(Envelope.user_id == budget_owner.telegram_id))
+        envelopes = list(env_result.scalars().all())
+        
+        expense_envs = [
+            e for e in envelopes 
+            if not getattr(e, 'is_debt', False) 
+            and not getattr(e, 'is_goal', False) 
+            and "буфер" not in e.name.lower()
+            and e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")
+        ]
+        
+        grp_envs = [e for e in expense_envs if get_envelope_group(e.name) == grp_name]
+        
+        if not grp_envs:
+            await callback.answer("Нет трат в этой категории", show_alert=True)
+            return
+            
+        await callback.answer()
+        
+        lines = []
+        for e in grp_envs:
+            limit_str = f" из <b>{fmt_money(e.target_amount or 0)}</b>" if e.target_amount else ""
+            lines.append(f"• {e.name}: доступно <b>{fmt_money(e.current_amount)}</b>{limit_str}")
+            
+        text = (
+            f"🔍 <b>Детализация категории: {grp_name}</b>\n\n"
+            + "\n".join(lines)
+        )
+        
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="⬅️ Назад к категориям", callback_data="back_to_expenses")]
+        ])
+        
+        await callback.message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
+
+
+@router.callback_query(F.data == "back_to_expenses")
+async def back_to_expenses_callback(callback: CallbackQuery):
+    await callback.answer()
+    async with async_session_maker() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        user = user_result.scalar_one_or_none()
+        
+        budget_owner = user
+        if user and user.family_host_id:
+            host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+            host = host_result.scalar_one_or_none()
+            if host:
+                budget_owner = host
+            else:
+                user.family_host_id = None
+                await session.flush()
+                
+        env_result = await session.execute(select(Envelope).where(Envelope.user_id == budget_owner.telegram_id))
+        envelopes = list(env_result.scalars().all())
+        
+        envelope_ids = [e.id for e in envelopes]
+        monthly_payments = await get_monthly_payments(session, envelope_ids)
+        
+        dashboard = build_dashboard(
+            envelopes, 
+            monthly_income=budget_owner.monthly_income or 0,
+            tab='expenses',
+            monthly_payments=monthly_payments
+        )
+        
+        expense_envs = [
+            e for e in envelopes 
+            if not getattr(e, 'is_debt', False) 
+            and not getattr(e, 'is_goal', False) 
+            and "буфер" not in e.name.lower()
+            and e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")
+        ]
+        
+        groups = {
+            "🏠 Жилье": [],
+            "🍔 Еда": [],
+            "🚗 Транспорт": [],
+            "❤️ Личное": [],
+            "📦 Прочее": []
+        }
+        for e in expense_envs:
+            grp = get_envelope_group(e.name)
+            groups[grp].append(e)
+            
+        keyboard_buttons = []
+        row = []
+        for grp_name, envs in groups.items():
+            if envs:
+                row.append(InlineKeyboardButton(text=f"🔍 {grp_name}", callback_data=f"detail_grp:{grp_name}"))
+                if len(row) == 2:
+                    keyboard_buttons.append(row)
+                    row = []
+        if row:
+            keyboard_buttons.append(row)
+            
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=keyboard_buttons)
+        
+        await callback.message.edit_text(dashboard, parse_mode="HTML", reply_markup=reply_markup)
 
 
 @router.callback_query(F.data == "show_envelopes")
