@@ -164,6 +164,7 @@ async def cmd_start(message: Message, state: FSMContext = None):
 
 @router.callback_query(F.data == "start_manual")
 async def process_manual_start(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await callback.message.edit_text(
         "🎙 <b>Настройка голосом или текстом</b>\n\n"
         "Просто запиши голосовое сообщение или напиши мне текстом: "
@@ -176,6 +177,7 @@ async def process_manual_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "start_instant")
 async def process_instant_start(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await state.clear()
     async with async_session_maker() as session:
         user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
@@ -220,6 +222,7 @@ async def process_instant_start(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "start_survey")
 async def start_survey_flow(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await state.set_state(OnboardingStates.step_cash)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -238,8 +241,9 @@ async def start_survey_flow(callback: CallbackQuery, state: FSMContext):
 
 @router.callback_query(F.data == "skip_cash", OnboardingStates.step_cash)
 async def process_skip_cash(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await state.update_data(cash=0.0)
-    await ask_step_income(callback.message, state)
+    await ask_step_income(callback.message, state, edit=True)
 
 
 @router.message(OnboardingStates.step_cash)
@@ -249,10 +253,10 @@ async def process_step_cash(message: Message, state: FSMContext):
         await message.answer("Пожалуйста, введи число (например: 10000 или 10к):")
         return
     await state.update_data(cash=val)
-    await ask_step_income(message, state)
+    await ask_step_income(message, state, edit=False)
 
 
-async def ask_step_income(message: Message, state: FSMContext):
+async def ask_step_income(message: Message, state: FSMContext, edit: bool = False):
     await state.set_state(OnboardingStates.step_income)
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Пропустить", callback_data="skip_income")]
@@ -264,7 +268,7 @@ async def ask_step_income(message: Message, state: FSMContext):
         "Сколько ты зарабатываешь в среднем за месяц? Это нужно, чтобы я мог рассчитать прогнозы.\n\n"
         "<i>Пример: 120к или 120 000. Если доход непостоянный, укажи средний ориентир.</i>"
     )
-    if hasattr(message, "edit_text"):
+    if edit:
         await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
     else:
         await message.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -272,8 +276,9 @@ async def ask_step_income(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "skip_income", OnboardingStates.step_income)
 async def process_skip_income(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await state.update_data(income=0.0)
-    await ask_step_debts(callback.message, state)
+    await ask_step_debts(callback.message, state, edit=True)
 
 
 @router.message(OnboardingStates.step_income)
@@ -283,10 +288,10 @@ async def process_step_income(message: Message, state: FSMContext):
         await message.answer("Пожалуйста, введи число (например: 120к или 120000):")
         return
     await state.update_data(income=val)
-    await ask_step_debts(message, state)
+    await ask_step_debts(message, state, edit=False)
 
 
-async def ask_step_debts(message: Message, state: FSMContext):
+async def ask_step_debts(message: Message, state: FSMContext, edit: bool = False):
     await state.set_state(OnboardingStates.step_debts)
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="У меня нет долгов / Пропустить", callback_data="skip_debts")]
@@ -301,7 +306,7 @@ async def ask_step_debts(message: Message, state: FSMContext):
         "<code>Долг другу: 15к</code>\n\n"
         "<i>Если долгов нет, нажми кнопку ниже.</i>"
     )
-    if hasattr(message, "edit_text"):
+    if edit:
         await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
     else:
         await message.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -309,8 +314,9 @@ async def ask_step_debts(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "skip_debts", OnboardingStates.step_debts)
 async def process_skip_debts(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     await state.update_data(debts=[])
-    await ask_step_priority(callback.message, state)
+    await ask_step_priority(callback.message, state, edit=True)
 
 
 @router.message(OnboardingStates.step_debts)
@@ -318,7 +324,7 @@ async def process_step_debts(message: Message, state: FSMContext):
     text = message.text.strip()
     if text == "0" or text.lower() in ("нет", "пропустить", "нет долгов"):
         await state.update_data(debts=[])
-        await ask_step_priority(message, state)
+        await ask_step_priority(message, state, edit=False)
         return
         
     wait_msg = await message.answer("⏳ <i>Распознаю долги...</i>", parse_mode="HTML")
@@ -335,7 +341,7 @@ async def process_step_debts(message: Message, state: FSMContext):
         else:
             await message.answer("ℹ️ Долгов не обнаружено.", parse_mode="HTML")
             
-        await ask_step_priority(message, state)
+        await ask_step_priority(message, state, edit=False)
     except Exception as e:
         logger.error(f"Failed to parse debts: {e}", exc_info=True)
         try:
@@ -345,7 +351,7 @@ async def process_step_debts(message: Message, state: FSMContext):
         await message.answer("Не совсем понял список долгов. Напиши, пожалуйста, как в примере: <code>Сбербанк 80к, платеж 4к</code> (или нажми кнопку)", parse_mode="HTML")
 
 
-async def ask_step_priority(message: Message, state: FSMContext):
+async def ask_step_priority(message: Message, state: FSMContext, edit: bool = False):
     await state.set_state(OnboardingStates.step_priority)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
@@ -360,7 +366,7 @@ async def ask_step_priority(message: Message, state: FSMContext):
         "<b>Шаг 4 из 5: Твой фокус</b>\n\n"
         "Что сейчас для тебя важнее всего? Это поможет мне точнее подбирать рекомендации."
     )
-    if hasattr(message, "edit_text"):
+    if edit:
         await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
     else:
         await message.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -368,12 +374,13 @@ async def ask_step_priority(message: Message, state: FSMContext):
 
 @router.callback_query(F.data.startswith("focus:"), OnboardingStates.step_priority)
 async def process_focus_callback(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     focus_code = callback.data.split(":", 1)[1]
     await state.update_data(focus=focus_code)
-    await ask_step_expenses(callback.message, state)
+    await ask_step_expenses(callback.message, state, edit=True)
 
 
-async def ask_step_expenses(message: Message, state: FSMContext):
+async def ask_step_expenses(message: Message, state: FSMContext, edit: bool = False):
     await state.set_state(OnboardingStates.step_expenses)
     markup = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Пропустить", callback_data="skip_expenses")]
@@ -389,7 +396,7 @@ async def ask_step_expenses(message: Message, state: FSMContext):
         "<code>Машина 10к</code>\n"
         "<code>Интернет 500</code>"
     )
-    if hasattr(message, "edit_text"):
+    if edit:
         await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
     else:
         await message.answer(text, parse_mode="HTML", reply_markup=markup)
@@ -397,6 +404,7 @@ async def ask_step_expenses(message: Message, state: FSMContext):
 
 @router.callback_query(F.data == "skip_expenses", OnboardingStates.step_expenses)
 async def process_skip_expenses(callback: CallbackQuery, state: FSMContext):
+    await callback.answer()
     data = await state.get_data()
     await callback.message.delete()
     await complete_onboarding(
