@@ -615,8 +615,22 @@ async def complete_onboarding(user_id: int, cash: float, income: float, debts: l
                         "alloc_amounts": alloc_amounts
                     })
                     
+                    persistent_keyboard = ReplyKeyboardMarkup(
+                        keyboard=[
+                            [KeyboardButton(text="📊 Навигатор")],
+                            [KeyboardButton(text="🛍 Расходы"), KeyboardButton(text="💳 Долги")]
+                        ],
+                        resize_keyboard=True,
+                        is_persistent=True
+                    )
+                    await message.answer(
+                        "<b>Бюджет успешно настроен! 🎉</b>\nЯ добавил нижние кнопки для удобной навигации по кошельку.",
+                        parse_mode="HTML",
+                        reply_markup=persistent_keyboard
+                    )
+
                     final_text = (
-                        f"<b>Бюджет успешно настроен! 🎉</b>\n\n"
+                        f"🤖 <b>Рекомендация ИИ по распределению:</b>\n\n"
                         f"{brain_response.coach_reply}"
                     )
                     
