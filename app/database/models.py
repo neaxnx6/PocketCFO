@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import BigInteger, ForeignKey, String, Float, DateTime, Boolean
+from sqlalchemy import BigInteger, ForeignKey, String, Float, DateTime, Boolean, Integer
 
 
 class Base(DeclarativeBase):
@@ -37,6 +37,7 @@ class Envelope(Base):
     is_goal: Mapped[bool] = mapped_column(Boolean, default=False)
     min_payment: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     priority: Mapped[int] = mapped_column(default=1)
+    due_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
 
     user = relationship("User", back_populates="envelopes")
     transactions = relationship("Transaction", back_populates="envelope")

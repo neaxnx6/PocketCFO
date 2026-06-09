@@ -530,7 +530,8 @@ async def complete_onboarding(user_id: int, cash: float, income: float, debts: l
                     target_amount=d["amount"],
                     current_amount=0.0,
                     is_debt=True,
-                    min_payment=d.get("min_payment")
+                    min_payment=d.get("min_payment"),
+                    due_day=d.get("due_day")
                 )
                 session.add(debt_env)
                 
@@ -542,7 +543,8 @@ async def complete_onboarding(user_id: int, cash: float, income: float, debts: l
                     target_amount=e["amount"],
                     current_amount=0.0,
                     is_debt=False,
-                    is_goal=False
+                    is_goal=False,
+                    due_day=e.get("due_day")
                 )
                 session.add(exp_env)
                 

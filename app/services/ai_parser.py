@@ -14,6 +14,7 @@ class ParsedDebt(BaseModel):
     name: str = Field(description="Название кредита, банка или человека, кому должен (например: 'Сбербанк', 'Халва', 'Долг другу')")
     amount: float = Field(description="Сумма оставшегося долга")
     min_payment: Optional[float] = Field(default=None, description="Минимальный обязательный ежемесячный платеж. Если нет, то 0.0 или null")
+    due_day: Optional[int] = Field(default=None, description="День платежа в месяце (число от 1 до 31), если упомянут, иначе null")
 
 class ParsedDebtsList(BaseModel):
     debts: List[ParsedDebt] = Field(default_factory=list)
@@ -21,6 +22,7 @@ class ParsedDebtsList(BaseModel):
 class ParsedExpense(BaseModel):
     name: str = Field(description="Название расхода (например: 'Аренда', 'Продукты', 'Машина', 'Интернет')")
     amount: float = Field(description="Месячный лимит или планируемая сумма расхода")
+    due_day: Optional[int] = Field(default=None, description="День платежа в месяце (число от 1 до 31), если упомянут, иначе null")
 
 class ParsedExpensesList(BaseModel):
     expenses: List[ParsedExpense] = Field(default_factory=list)
@@ -63,10 +65,11 @@ async def parse_onboarding_debts(user_text: str) -> ParsedDebtsList:
         "Для каждого долга найди:\n"
         "- Название кредита/долга (например: 'Сбербанк', 'Халва', 'Долг другу').\n"
         "- Общую сумму долга (amount).\n"
-        "- Минимальный обязательный ежемесячный платеж (min_payment) — если он упомянут, иначе поставь null.\n\n"
+        "- Минимальный обязательный ежемесячный платеж (min_payment) — если он упомянут, иначе поставь null.\n"
+        "- День ежемесячного платежа (due_day) — число месяца от 1 до 31 (например: 'до 25 числа' -> 25, 'срок 20-го' -> 20). Если не упомянут, поставь null.\n\n"
         "Ответ верни строго в виде JSON-объекта со списком 'debts'.\n"
         "Пример формата:\n"
-        '{"debts": [{"name": "Кредитка Сбербанк", "amount": 80000.0, "min_payment": 4000.0}, {"name": "Долг другу", "amount": 15000.0, "min_payment": null}]}\n'
+        '{"debts": [{"name": "Кредитка Сбербанк", "amount": 80000.0, "min_payment": 4000.0, "due_day": 25}, {"name": "Долг другу", "amount": 15000.0, "min_payment": null, "due_day": null}]}\n'
         "Если долгов нет или в тексте написан 0 или слово 'нет', верни пустой список:\n"
         '{"debts": []}\n'
         "Ответ должен содержать ТОЛЬКО валидный JSON."
@@ -97,10 +100,11 @@ async def parse_onboarding_expenses(user_text: str) -> ParsedExpensesList:
         "Ты — финансовый помощник. Извлеки список регулярных месячных трат из сообщения пользователя.\n"
         "Для каждого расхода найди:\n"
         "- Название расхода (например: 'Аренда', 'Продукты', 'Машина', 'Интернет').\n"
-        "- Месячный лимит или планируемую сумму (amount).\n\n"
+        "- Месячный лимит или планируемую сумму (amount).\n"
+        "- День ежемесячного платежа (due_day) — число месяца от 1 до 31 (например: 'Аренда 35к до 10 числа' -> 10, 'интернет 15-го' -> 15). Если не упомянут, поставь null.\n\n"
         "Ответ верни строго в виде JSON-объекта со списком 'expenses'.\n"
         "Пример формата:\n"
-        '{"expenses": [{"name": "Аренда", "amount": 35000.0}, {"name": "Продукты", "amount": 25000.0}, {"name": "Интернет", "amount": 500.0}]}\n'
+        '{"expenses": [{"name": "Аренда", "amount": 35000.0, "due_day": 10}, {"name": "Продукты", "amount": 25000.0, "due_day": null}, {"name": "Интернет", "amount": 500.0, "due_day": 15}]}\n'
         "Если расходов нет, верни пустой список:\n"
         '{"expenses": []}\n'
         "Ответ должен содержать ТОЛЬКО валидный JSON."

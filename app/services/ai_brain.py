@@ -12,6 +12,7 @@ class PydanticEnvelope(BaseModel):
     is_debt: bool = False
     is_goal: bool = False
     min_payment: Optional[float] = None
+    due_day: Optional[int] = None
 
 
 class PlanItem(BaseModel):
@@ -57,9 +58,9 @@ SYSTEM_PROMPT_BODY = """\
  ВАЖНО: Режим profile_update используй ТОЛЬКО ОДИН РАЗ для настройки бюджета! Если юзер оплатил счета или получил премию — это СТРОГО intent: transaction!
  Ты ОБЯЗАТЕЛЬНО должен передать ВСЕ фонды в массиве envelopes_to_create!
  🛑 ПРАВИЛО СТАРТОВЫХ БАЛАНСОВ: Все создаваемые/настраиваемые конверты в массиве `envelopes_to_create` обязаны иметь `current_amount = 0.0`. Вся сумма стартовых/наличных денег пользователя (например, "у меня есть 10к свободных", "отложил 10к с прошлого месяца") должна быть записана СТРОГО в поле `free_cash`. Никакой конверт (включая "Буфер") не должен иметь `current_amount` больше 0 при онбординге!
- а) Расходы: is_debt=F, is_goal=F. ВАЖНО: current_amount = 0.0.
+ а) Расходы: is_debt=F, is_goal=F. ВАЖНО: current_amount = 0.0. Если упомянут день платежа (например, 'до 15 числа'), запиши его в due_day (число от 1 до 31).
  б) Цели: is_debt=F, is_goal=T, current_amount = 0.0.
- в) Долги: is_debt=T, is_goal=F, target_amount = ВЕСЬ ДОЛГ, current_amount = 0.0 (погашено). ОБЯЗАТЕЛЬНО: если пользователь упомянул минимальный обязательный ежемесячный платеж по долгу (например, 'минималка 10к'), запиши это число в min_payment.
+ в) Долги: is_debt=T, is_goal=F, target_amount = ВЕСЬ ДОЛГ, current_amount = 0.0 (погашено). ОБЯЗАТЕЛЬНО: если пользователь упомянул минимальный обязательный ежемесячный платеж по долгу (например, 'минималка 10к'), запиши это число в min_payment. Если упомянут день платежа (например, 'до 25 числа'), запиши его в due_day (число от 1 до 31).
  г) Буфер: Назови строго "Буфер". is_debt=F, is_goal=T, current_amount = 0.0, target_amount = 0.0.
  🛑 КРИТИЧЕСКОЕ ПРАВИЛО БАЛАНСА: Сумма всех current_amount созданных конвертов + free_cash должна СТРОГО равняться общей сумме денег, которая СЕЙЧАС есть у пользователя на руках. При онбординге вся эта сумма попадает строго в `free_cash` (а все конверты имеют `current_amount = 0.0`).
  Имена фондов в plan_items должны ТОЧНО СОВПАДАТЬ с envelopes_to_create!
@@ -107,7 +108,7 @@ SYSTEM_PROMPT_BODY = """\
 
 SYSTEM_PROMPT_EXAMPLES = (
     '\nПРИМЕРЫ (сжато):\n'
-    'profile_update: {"thoughts":"Посчитал...","intent":"profile_update","monthly_income":240000,"free_cash":64000,"plan_items":[{"name":"Отпуск","amount":50000}],"envelopes_to_create":[{"name":"Аренда","target_amount":35000,"current_amount":35000,"is_debt":false,"is_goal":false}],"show_dashboard":true,"coach_reply":"🚨 <b>Сводка</b>\\nСвободно: 64к\\n\\nПредлагаю план:\\n• Отпуск: +50к\\n• Долг Сбер: +14к"}\n'
+    'profile_update: {"thoughts":"Посчитал...","intent":"profile_update","monthly_income":240000,"free_cash":64000,"plan_items":[{"name":"Отпуск","amount":50000}],"envelopes_to_create":[{"name":"Аренда","target_amount":35000,"current_amount":35000,"is_debt":false,"is_goal":false,"due_day":15}],"show_dashboard":true,"coach_reply":"🚨 <b>Сводка</b>\\nСвободно: 64к\\n\\nПредлагаю план:\\n• Отпуск: +50к\\n• Долг Сбер: +14к"}\n'
     'expense: {"intent":"transaction","transactions":[{"action":"expense","amount":5000,"target_envelope_name":"Машина"}, {"action":"expense","amount":3000,"target_envelope_name":"Продукты"}],"show_dashboard":true,"coach_reply":"💸 Учтено:\\n<b>−5000</b> → Машина\\n<b>−3000</b> → Продукты"}\n'
     'income: {"intent":"transaction","transactions":[{"action":"income","amount":30000}],"income_allocations":[{"envelope_name":"Халва","amount":20000},{"envelope_name":"Аренда","amount":10000}],"show_dashboard":true,"coach_reply":"💰 Получено 30к\\n\\n🤖 Рекомендация ИИ: У тебя висит кредитка с обязательным платежом 20к и не закрыта аренда на 10к. Я предлагаю закрыть их в первую очередь.\\n\\nПлан:\\n• 20к → Халва\\n• 10к → Аренда\\n\\nПрименить план?\\n<i>(или просто напиши свой вариант распределения в ответ)</i>"}\n'
     'chat: {"intent":"chat","show_dashboard":true,"coach_reply":"Смотри ниже 👇"}\n'
