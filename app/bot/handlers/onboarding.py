@@ -297,10 +297,11 @@ async def ask_step_debts(message: Message, state: FSMContext, edit: bool = False
     
     text = (
         "<b>Шаг 3 из 5: Долги и кредиты</b>\n\n"
-        "Есть ли у тебя активные кредиты, карты или долги? Напиши общую сумму долга и минимальный ежемесячный платеж.\n\n"
+        "Есть ли у тебя активные кредиты, карты или долги? Укажи название, сумму долга, минимальный платеж и <b>срок оплаты</b> (если он есть).\n\n"
         "<b>Пример:</b>\n"
-        "<code>Сбербанк: долг 80к, платеж 4к</code>\n"
-        "<code>Долг другу: 15к</code>\n\n"
+        "<code>Сбербанк: долг 80к, платеж 4к до 25 числа</code>\n"
+        "<code>Кредитка Халва 30к, платеж 3к до 15-го</code>\n"
+        "<code>Долг другу 15к</code>\n\n"
         "<i>Если долгов нет, нажми кнопку ниже.</i>"
     )
     if edit:
@@ -398,12 +399,12 @@ async def ask_step_expenses(message: Message, state: FSMContext, edit: bool = Fa
     
     text = (
         "<b>Шаг 5 из 5: Обычные расходы</b>\n\n"
-        "Какие траты у тебя обычно есть каждый месяц? Просто напиши как помнишь.\n\n"
+        "Какие регулярные траты у тебя есть каждый месяц? Укажи планируемую сумму и <b>срок оплаты</b> (если он есть — например, для аренды или подписок).\n\n"
         "<b>Пример:</b>\n"
-        "<code>Аренда 35к</code>\n"
+        "<code>Аренда 35к до 10 числа</code>\n"
         "<code>Продукты 25к</code>\n"
         "<code>Машина 10к</code>\n"
-        "<code>Интернет 500</code>"
+        "<code>Интернет 500 рублей до 15-го</code>"
     )
     if edit:
         await message.edit_text(text, parse_mode="HTML", reply_markup=markup)
@@ -681,3 +682,70 @@ async def complete_onboarding(user_id: int, cash: float, income: float, debts: l
         )
         await message.answer(final_text, parse_mode="HTML", reply_markup=persistent_keyboard)
         await state.clear()
+
+
+async def transcribe_onboarding_voice(message: Message, bot: Bot) -> Optional[str]:
+    await message.chat.do("typing")
+    file_path = f"temp_voice_{message.from_user.id}_{message.message_id}.ogg"
+    try:
+        file = await bot.get_file(message.voice.file_id)
+        await bot.download_file(file.file_path, destination=file_path)
+
+        if not os.path.exists(file_path):
+            raise ValueError("Failed to save file from Telegram")
+
+        from app.services.voice_service import transcribe_voice
+        transcribed_text = await transcribe_voice(file_path)
+        await message.answer(f"🎤 <i>{transcribed_text}</i>", parse_mode="HTML")
+        return transcribed_text
+    except Exception as e:
+        logger.error(f"Error processing onboarding voice: {e}")
+        await message.answer("Ой, не удалось распознать голосовое. Давай лучше текстом?")
+        return None
+    finally:
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+
+@router.message(F.voice, OnboardingStates.step_cash)
+async def process_cash_voice(message: Message, bot: Bot, state: FSMContext):
+    text = await transcribe_onboarding_voice(message, bot)
+    if text:
+        try:
+            message.text = text
+        except Exception:
+            message = message.model_copy(update={"text": text})
+        await process_step_cash(message, state)
+
+
+@router.message(F.voice, OnboardingStates.step_income)
+async def process_income_voice(message: Message, bot: Bot, state: FSMContext):
+    text = await transcribe_onboarding_voice(message, bot)
+    if text:
+        try:
+            message.text = text
+        except Exception:
+            message = message.model_copy(update={"text": text})
+        await process_step_income(message, state)
+
+
+@router.message(F.voice, OnboardingStates.step_debts)
+async def process_debts_voice(message: Message, bot: Bot, state: FSMContext):
+    text = await transcribe_onboarding_voice(message, bot)
+    if text:
+        try:
+            message.text = text
+        except Exception:
+            message = message.model_copy(update={"text": text})
+        await process_step_debts(message, state)
+
+
+@router.message(F.voice, OnboardingStates.step_expenses)
+async def process_expenses_voice(message: Message, bot: Bot, state: FSMContext):
+    text = await transcribe_onboarding_voice(message, bot)
+    if text:
+        try:
+            message.text = text
+        except Exception:
+            message = message.model_copy(update={"text": text})
+        await process_step_expenses(message, state)
