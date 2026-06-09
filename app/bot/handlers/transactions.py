@@ -249,26 +249,23 @@ def build_financial_health(envelopes: list[Envelope], monthly_income: float = 0.
 
 def get_health_status(envelopes: list) -> str:
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
-    expense_envs = [e for e in envelopes if not getattr(e, 'is_debt', False) and not getattr(e, 'is_goal', False)]
-    total_debt = sum((e.target_amount or 0) - e.current_amount for e in debt_envs)
-    monthly_expenses = (
-        sum(e.target_amount or 0 for e in expense_envs if (e.target_amount or 0) > 0)
-        + sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
-    )
+    expense_envs = [e for e in envelopes if not getattr(e, 'is_debt', False) and not getattr(e, 'is_goal', False) and "буфер" not in e.name.lower() and e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")]
     
-    free_cash_env = _find_unallocated(envelopes)
-    free_cash = free_cash_env.current_amount if free_cash_env else 0
-    denominator = free_cash if free_cash > 0 else monthly_expenses * 0.2
-    
-    if total_debt > 0:
-        months = total_debt / denominator if denominator > 0 else 99
-        if months > 6:
-            return "🟡 <b>Состояние:</b> Напряженное (в фокусе — гашение долгов)"
-        elif months > 3:
-            return "🟡 <b>Состояние:</b> Стабильное (долги под контролем)"
-        else:
-            return "🟢 <b>Состояние:</b> Хорошее (финишная прямая по долгам)"
-    return "🟢 <b>Состояние:</b> Отличное (долгов нет, фокус на капитал)"
+    underfunded_base = [e for e in expense_envs if get_envelope_group(e.name) in ("🏠 Жилье", "🍔 Еда", "🚗 Транспорт") and (e.target_amount or 0.0) - e.current_amount > 0]
+    if underfunded_base:
+        return "🟡 <b>Состояние:</b> Напряженное (базовые расходы не обеспечены)"
+
+    underfunded_mins = [d for d in debt_envs if (d.target_amount or 0.0) - d.current_amount > 0 and (d.min_payment or 0.0) > d.current_amount]
+    if underfunded_mins:
+        return "🟡 <b>Состояние:</b> Напряженное (нужно внести мин. платежи)"
+
+    buffer_env = next((e for e in envelopes if "буфер" in e.name.lower()), None)
+    buffer_target = buffer_env.target_amount or 30000.0 if buffer_env else 30000.0
+    buffer_val = buffer_env.current_amount if buffer_env else 0.0
+    if buffer_val < buffer_target:
+        return "🟡 <b>Состояние:</b> Стабильное (нет подушки безопасности)"
+
+    return "🟢 <b>Состояние:</b> Отличное (бюджет в балансе)"
 
 
 def calculate_forecasts(envelopes: list, monthly_income: float) -> dict:
@@ -389,41 +386,119 @@ def get_envelope_group(name: str) -> str:
 
 
 def get_financial_insight(envelopes: list) -> str:
+    expense_envs = [
+        e for e in envelopes 
+        if not getattr(e, 'is_debt', False) 
+        and not getattr(e, 'is_goal', False) 
+        and "буфер" not in e.name.lower()
+        and e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")
+    ]
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
+    goal_envs = [e for e in envelopes if getattr(e, 'is_goal', False) and "буфер" not in e.name.lower()]
     buffer_env = next((e for e in envelopes if "буфер" in e.name.lower()), None)
+
+    underfunded_base = [e for e in expense_envs if get_envelope_group(e.name) in ("🏠 Жилье", "🍔 Еда", "🚗 Транспорт") and (e.target_amount or 0.0) - e.current_amount > 0]
+    active_debts = [d for d in debt_envs if (d.target_amount or 0.0) - d.current_amount > 0]
+    underfunded_mins = [d for d in active_debts if (d.min_payment or 0.0) > d.current_amount]
+    underfunded_other = [e for e in expense_envs if get_envelope_group(e.name) not in ("🏠 Жилье", "🍔 Еда", "🚗 Транспорт") and (e.target_amount or 0.0) - e.current_amount > 0]
     
-    insight = ""
-    # 1. Mandatory Credit Card Payments check
-    active_debts_with_min = [d for d in debt_envs if (d.min_payment or 0) > 0 and (d.target_amount or 0) - d.current_amount > 0]
-    if active_debts_with_min:
-        total_min_pay = sum(d.min_payment or 0 for d in active_debts_with_min)
-        lines = [f"{d.name} (<b>{fmt_money(d.min_payment)}</b>)" for d in active_debts_with_min]
-        insight = f"🔥 <b>Следующий шаг:</b> Обеспечить минимальные платежи по кредиткам на сумму <b>{fmt_money(total_min_pay)}</b>:\n" + "\n".join(f"• {l}" for l in lines)
-        
-    # 2. Zero Buffer Alert
-    elif not buffer_env or buffer_env.current_amount <= 0:
-        insight = "⚠️ <b>Следующий шаг:</b> С ближайшего дохода нужно заложить хотя бы минимальный буфер. Жить без подушки небезопасно."
+    buffer_target = buffer_env.target_amount or 30000.0 if buffer_env else 30000.0
+    buffer_val = buffer_env.current_amount if buffer_env else 0.0
+    buffer_needed = max(0.0, buffer_target - buffer_val)
+    underfunded_goals = [g for g in goal_envs if (g.target_amount or 0.0) - g.current_amount > 0]
+
+    header = ""
+    desc = ""
+    reason = ""
     
-    # 3. Easy Debt Win
-    elif debt_envs and [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]:
-        active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
-        active_debts.sort(key=lambda x: (x.target_amount or 0) - x.current_amount)
-        smallest_debt = active_debts[0]
-        remaining = (smallest_debt.target_amount or 0) - smallest_debt.current_amount
-        if remaining < 10000:
-            insight = f"🔥 <b>Следующий шаг:</b> Добить остаток по «{smallest_debt.name}» (<b>{fmt_money(remaining)}</b>). Один рывок — и минус один долг!"
-        else:
-            insight = "💡 <b>Фокус:</b> Продолжаем методично гасить кредиты. Каждая тысяча сверх минимума экономит тебе время и проценты."
-            
-    # 4. Growth Phase
+    if underfunded_base:
+        total_base_deficit = sum((e.target_amount or 0.0) - e.current_amount for e in underfunded_base)
+        header = "🔥 <b>Следующий шаг</b>"
+        desc = f"Для спокойного прохождения месяца пока не хватает <b>{fmt_money(total_base_deficit)}</b> на жилье, еду и транспорт."
+        reason = "Сначала закрываем базовые нужды (жилье, еду, транспорт), чтобы обеспечить безопасность. После этого перейдем к обязательным платежам по кредитам."
+    elif underfunded_mins:
+        total_min_deficit = sum((d.min_payment or 0.0) - d.current_amount for d in underfunded_mins)
+        header = "🔥 <b>Следующий шаг</b>"
+        desc = f"Базовые нужды закрыты. Теперь нужно обеспечить минимальные платежи по кредитам на сумму <b>{fmt_money(total_min_deficit)}</b>, чтобы избежать штрафов."
+        reason = "Базовые нужды закрыты. Теперь закрываем обязательные платежи по кредитам, чтобы избежать штрафов и пени."
+    elif underfunded_other:
+        total_other_deficit = sum((e.target_amount or 0.0) - e.current_amount for e in underfunded_other)
+        header = "💡 <b>Следующий шаг</b>"
+        desc = f"Осталось закрыть прочие расходы месяца на сумму <b>{fmt_money(total_other_deficit)}</b>."
+        reason = "Все обязательные платежи и базовые расходы обеспечены. Направляем деньги на прочие запланированные покупки месяца."
+    elif buffer_needed > 0:
+        header = "🛡 <b>Следующий шаг</b>"
+        desc = f"Все обязательства обеспечены! Рекомендую собрать резерв безопасности (цель: <b>{fmt_money(buffer_target)}</b>, не хватает <b>{fmt_money(buffer_needed)}</b>)."
+        reason = "Обязательства закрыты! Направляем деньги на создание буфера безопасности, чтобы застраховаться от форс-мажоров."
     else:
-        goal_envs = [e for e in envelopes if getattr(e, 'is_goal', False) and "буфер" not in e.name.lower()]
-        if goal_envs:
-            insight = "🚀 <b>Фокус:</b> Бюджет сбалансирован. Все свободные деньги теперь работают на твои цели!"
+        # Level 4
+        if active_debts:
+            active_debts.sort(key=lambda x: (x.target_amount or 0.0) - x.current_amount)
+            smallest_debt = active_debts[0]
+            rem = (smallest_debt.target_amount or 0.0) - smallest_debt.current_amount
+            header = "🚀 <b>Фокус</b>"
+            desc = f"Все обязательства и буфер закрыты! Свободные деньги направляй на досрочное закрытие долга «{smallest_debt.name}» (осталось <b>{fmt_money(rem)}</b>)."
+            reason = "Все базовые потребности и буфер закрыты! Свободные деньги направляем на досрочное закрытие кредитов (метод снежного кома), чтобы сэкономить на процентах."
+        elif underfunded_goals:
+            header = "🎯 <b>Фокус</b>"
+            desc = "Бюджет сбалансирован. Все свободные деньги теперь работают на твои цели!"
+            reason = "Бюджет в идеальном балансе. Направляй свободные деньги на крупные цели."
         else:
-            insight = "💡 Бюджет в норме. Распределяй новые доходы по правилу: сначала плати себе (буфер), потом трать."
+            header = "💡 <b>Фокус</b>"
+            desc = "Бюджет в норме. Распределяй новые доходы по правилу: сначала плати себе (буфер), потом трать."
+            reason = "Все базовые потребности закрыты. Свободные деньги можно направить на новые цели или инвестиции."
+
+    # Build queue list
+    queue_items = []
+    # 1. Base
+    for e in underfunded_base:
+        needed = (e.target_amount or 0.0) - e.current_amount
+        queue_items.append((e.name, needed))
+    # 2. Min payments
+    for d in underfunded_mins:
+        needed = (d.min_payment or 0.0) - d.current_amount
+        queue_items.append((f"{d.name} (мин. платёж)", needed))
+    # 3. Other
+    for e in underfunded_other:
+        needed = (e.target_amount or 0.0) - e.current_amount
+        queue_items.append((e.name, needed))
+    # 4. Buffer
+    if buffer_needed > 0:
+        queue_items.append(("Буфер безопасности", buffer_needed))
+    # 5. Goals
+    for g in underfunded_goals:
+        needed = (g.target_amount or 0.0) - g.current_amount
+        queue_items.append((g.name, needed))
+
+    # Remove duplicates
+    seen = set()
+    unique_items = []
+    for name, needed in queue_items:
+        if name not in seen and needed > 0:
+            seen.add(name)
+            unique_items.append((name, needed))
+
+    if unique_items:
+        # Deficit block
+        deficit_lines = []
+        for name, needed in unique_items[:4]:  # limit to top 4
+            deficit_lines.append(f"• {name} (не хватает <b>{fmt_money(needed)}</b>)")
+        deficit_text = "<b>Очередь финансирования:</b>\n" + "\n".join(deficit_lines)
+
+        # Plan of action
+        action_lines = []
+        if len(unique_items) >= 1:
+            action_lines.append(f"• первые <b>{fmt_money(unique_items[0][1])}</b> → {unique_items[0][0]}")
+        if len(unique_items) >= 2:
+            action_lines.append(f"• следующие <b>{fmt_money(unique_items[1][1])}</b> → {unique_items[1][0]}")
+        if len(unique_items) >= 3:
+            action_lines.append(f"• затем → {unique_items[2][0]}")
             
-    return insight
+        action_text = "<b>Если придут следующие деньги:</b>\n" + "\n".join(action_lines)
+
+        return f"{header}\n{desc}\n\n<i>{reason}</i>\n\n{deficit_text}\n\n{action_text}"
+    else:
+        return f"{header}\n{desc}\n\n<i>{reason}</i>"
 
 
 def build_micro_navigator(
@@ -499,24 +574,39 @@ def build_dashboard(
     
     # === ВКЛАДКА 1: НАВИГАТОР ===
     if tab == 'navigator':
-        parts.append("📍 <b>ВКЛАДКА: НАВИГАТОР</b>\n")
-        parts.append(get_health_status(envelopes))
-        parts.append("")  # Empty line
-        
-        expenses_obligations = sum(e.target_amount or 0 for e in expense_envs)
-        debts_obligations = sum(d.min_payment or 0 for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0)
+        expenses_obligations = sum(e.target_amount or 0.0 for e in expense_envs)
+        debts_obligations = sum(d.min_payment or 0.0 for d in debt_envs if (d.target_amount or 0.0) - d.current_amount > 0)
         total_obligations = expenses_obligations + debts_obligations
         
-        total_funded = sum(e.current_amount for e in expense_envs) + unallocated_amount
+        funded_expenses = sum(min(e.current_amount, e.target_amount or 0.0) for e in expense_envs)
+        funded_debts = sum(min(d.current_amount, d.min_payment or 0.0) for d in debt_envs if (d.target_amount or 0.0) - d.current_amount > 0)
+        total_funded = funded_expenses + funded_debts
+        if total_obligations > 0:
+            total_funded = min(total_funded, total_obligations)
+            
         deficit = max(0.0, total_obligations - total_funded)
+        
+        coverage_pct = int((total_funded / total_obligations * 100)) if total_obligations > 0 else 100
+        
+        parts.append("📍 <b>ВКЛАДКА: НАВИГАТОР</b>\n")
+        parts.append(f"📊 <b>Обеспеченность месяца:</b> <b>{coverage_pct}%</b>")
+        parts.append(get_health_status(envelopes))
+        parts.append("")  # Empty line
         
         total_in_envelopes = sum(e.current_amount for e in expense_envs) + sum(e.current_amount for e in goal_envs)
         buffer_amount = buffer_env.current_amount if buffer_env else 0.0
         total_money = total_in_envelopes + unallocated_amount + buffer_amount
         
+        free_cash_line = f"• Свободно: <b>{fmt_money(unallocated_amount)}</b>"
+        if unallocated_amount > 0 and deficit > 0:
+            if unallocated_amount >= deficit:
+                free_cash_line += " (этого достаточно для полного покрытия месяца, осталось распределить! ✨)"
+            else:
+                free_cash_line += f" (хватит, чтобы покрыть еще <b>{fmt_money(unallocated_amount)}</b> обязательств 💡)"
+                
         parts.append(
             f"💰 <b>Деньги:</b> <b>{fmt_money(total_money)}</b>\n"
-            f"• Свободно: <b>{fmt_money(unallocated_amount)}</b>\n"
+            f"{free_cash_line}\n"
             f"• В конвертах: <b>{fmt_money(total_in_envelopes)}</b>\n"
             f"• Буфер: <b>{fmt_money(buffer_amount)}</b>"
         )

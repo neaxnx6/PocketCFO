@@ -230,7 +230,6 @@ async def start_survey_flow(callback: CallbackQuery, state: FSMContext):
     ])
     
     await callback.message.edit_text(
-        "🟢 [░░░░░░░░░░] 0%\n\n"
         "<b>Шаг 1 из 5: Твои свободные деньги</b>\n\n"
         "Какая сумма сейчас лежит у тебя на руках или картах? Это свободные деньги, которые мы сможем распределить.\n\n"
         "<i>Пример: 15 000 или 15к. Если сейчас свободных денег нет, отправь 0.</i>",
@@ -263,7 +262,6 @@ async def ask_step_income(message: Message, state: FSMContext, edit: bool = Fals
     ])
     
     text = (
-        "🟡 [██░░░░░░░░] 20%\n\n"
         "<b>Шаг 2 из 5: Ежемесячный доход</b>\n\n"
         "Сколько ты зарабатываешь в среднем за месяц? Это нужно, чтобы я мог рассчитать прогнозы.\n\n"
         "<i>Пример: 120к или 120 000. Если доход непостоянный, укажи средний ориентир.</i>"
@@ -298,7 +296,6 @@ async def ask_step_debts(message: Message, state: FSMContext, edit: bool = False
     ])
     
     text = (
-        "🟠 [████░░░░░░] 40%\n\n"
         "<b>Шаг 3 из 5: Долги и кредиты</b>\n\n"
         "Есть ли у тебя активные кредиты, карты или долги? Напиши общую сумму долга и минимальный ежемесячный платеж.\n\n"
         "<b>Пример:</b>\n"
@@ -355,14 +352,13 @@ async def ask_step_priority(message: Message, state: FSMContext, edit: bool = Fa
     await state.set_state(OnboardingStates.step_priority)
     
     markup = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔥 Закрыть долги", callback_data="focus:debts")],
-        [InlineKeyboardButton(text="🛡 Создать подушку", callback_data="focus:buffer")],
-        [InlineKeyboardButton(text="🎯 Начать копить", callback_data="focus:save")],
+        [InlineKeyboardButton(text="💳 Быстрее закрыть долги", callback_data="focus:debts")],
+        [InlineKeyboardButton(text="🛡 Собрать подушку безопасности", callback_data="focus:buffer")],
+        [InlineKeyboardButton(text="🎯 Начать копить на крупную цель", callback_data="focus:save")],
         [InlineKeyboardButton(text="📊 Просто контролировать расходы", callback_data="focus:control")]
     ])
     
     text = (
-        "🟣 [██████░░░░] 60%\n\n"
         "<b>Шаг 4 из 5: Твой фокус</b>\n\n"
         "Что сейчас для тебя важнее всего? Это поможет мне точнее подбирать рекомендации."
     )
@@ -377,7 +373,21 @@ async def process_focus_callback(callback: CallbackQuery, state: FSMContext):
     await callback.answer()
     focus_code = callback.data.split(":", 1)[1]
     await state.update_data(focus=focus_code)
-    await ask_step_expenses(callback.message, state, edit=True)
+    
+    focus_map = {
+        "debts": "💳 Быстрее закрыть долги",
+        "buffer": "🛡 Собрать подушку безопасности",
+        "save": "🎯 Накопить на крупную цель",
+        "control": "📊 Просто контролировать расходы"
+    }
+    focus_name = focus_map.get(focus_code, focus_code)
+    await callback.message.edit_text(
+        f"<b>Шаг 4 из 5: Твой фокус</b>\n\n"
+        f"Выбрано: {focus_name}",
+        parse_mode="HTML"
+    )
+    
+    await ask_step_expenses(callback.message, state, edit=False)
 
 
 async def ask_step_expenses(message: Message, state: FSMContext, edit: bool = False):
@@ -387,7 +397,6 @@ async def ask_step_expenses(message: Message, state: FSMContext, edit: bool = Fa
     ])
     
     text = (
-        "🔴 [████████░░] 80%\n\n"
         "<b>Шаг 5 из 5: Обычные расходы</b>\n\n"
         "Какие траты у тебя обычно есть каждый месяц? Просто напиши как помнишь.\n\n"
         "<b>Пример:</b>\n"
@@ -605,7 +614,6 @@ async def complete_onboarding(user_id: int, cash: float, income: float, debts: l
                     })
                     
                     final_text = (
-                        f"✨ [██████████] 100%\n"
                         f"<b>Бюджет успешно настроен! 🎉</b>\n\n"
                         f"{brain_response.coach_reply}"
                     )
@@ -621,7 +629,6 @@ async def complete_onboarding(user_id: int, cash: float, income: float, debts: l
         
         # Fallback if no cash or no targets
         final_text = (
-            f"✨ [██████████] 100%\n"
             f"<b>Бюджет успешно настроен! 🎉</b>\n\n"
             f"Все статьи созданы пустыми, планируемый доход сохранен. Жду твоих трат или поступлений!"
         )
@@ -645,7 +652,6 @@ async def complete_onboarding(user_id: int, cash: float, income: float, debts: l
             pass
             
         final_text = (
-            f"✨ [██████████] 100%\n"
             f"<b>Бюджет успешно настроен! 🎉</b>\n\n"
             f"Все данные сохранены. Нажми кнопку «Навигатор» ниже, чтобы посмотреть сводку."
         )

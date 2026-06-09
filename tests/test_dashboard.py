@@ -16,18 +16,28 @@ class MockTx:
 
 def test_build_dashboard_navigator():
     envelopes = [
-        MockEnvelope(1, "Аренда", 35000, 35000, is_debt=False, is_goal=False),
-        MockEnvelope(2, "Кредитка", 10000, 50000, is_debt=True, is_goal=False, min_payment=5000),
+        MockEnvelope(1, "Аренда", 20000, 35000, is_debt=False, is_goal=False),
+        MockEnvelope(2, "Кредитка", 5000, 50000, is_debt=True, is_goal=False, min_payment=5000),
         MockEnvelope(3, "Нераспределённые", 10000, 0, is_debt=False, is_goal=False),
     ]
     
     result = build_dashboard(envelopes, monthly_income=70000, tab='navigator', monthly_payments={})
     assert "ВКЛАДКА: НАВИГАТОР" in result
-    assert "Деньги:</b> <b>45к</b>" in result
-    assert "Свободно: <b>10к</b>" in result
+    assert "Деньги:</b> <b>30к</b>" in result
+    assert "Свободно: <b>10к</b> (хватит, чтобы покрыть еще <b>10к</b> обязательств 💡)" in result
     assert "ОБЯЗАТЕЛЬСТВА:</b> <b>40к</b>" in result
-    assert "Обеспечено: <b>45к</b>" in result
-    assert "Не хватает: <b>0</b>" in result
+    assert "Обеспечено: <b>25к</b>" in result
+    assert "Не хватает: <b>15к</b>" in result
+    assert "Обеспеченность месяца:</b> <b>62%</b>" in result
+
+    # Test when unallocated is enough to cover deficit
+    envelopes_enough = [
+        MockEnvelope(1, "Аренда", 20000, 35000, is_debt=False, is_goal=False),
+        MockEnvelope(2, "Кредитка", 5000, 50000, is_debt=True, is_goal=False, min_payment=5000),
+        MockEnvelope(3, "Нераспределённые", 20000, 0, is_debt=False, is_goal=False),
+    ]
+    result_enough = build_dashboard(envelopes_enough, monthly_income=70000, tab='navigator', monthly_payments={})
+    assert "Свободно: <b>20к</b> (этого достаточно для полного покрытия месяца, осталось распределить! ✨)" in result_enough
 
 def test_build_dashboard_expenses():
     envelopes = [
