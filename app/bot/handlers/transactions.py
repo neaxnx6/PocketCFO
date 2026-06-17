@@ -1946,14 +1946,13 @@ async def confirm_paid_yes(callback: CallbackQuery, state: FSMContext):
 
         marked_names = []
         if env_names:
+            env_result = await session.execute(
+                select(Envelope).where(Envelope.user_id == budget_owner.telegram_id)
+            )
+            all_envelopes = list(env_result.scalars().all())
+            
             for name in env_names:
-                env_result = await session.execute(
-                    select(Envelope).where(
-                        Envelope.user_id == budget_owner.telegram_id,
-                        func.lower(Envelope.name) == name.lower().strip()
-                    )
-                )
-                env = env_result.scalar_one_or_none()
+                env = _find_envelope(all_envelopes, name)
                 if env:
                     env.last_paid_month = current_month_str
                     marked_names.append(env.name)
