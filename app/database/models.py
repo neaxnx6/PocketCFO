@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
-from sqlalchemy import BigInteger, ForeignKey, String, Float, DateTime, Boolean, Integer
+from sqlalchemy import BigInteger, ForeignKey, String, Float, DateTime, Boolean, Integer, UniqueConstraint
 
 
 class Base(DeclarativeBase):
@@ -81,4 +81,22 @@ class UserNudge(Base):
 
     user = relationship("User")
     envelope = relationship("Envelope")
+
+
+class BudgetSyncAdjustment(Base):
+    __tablename__ = "budget_sync_adjustments"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    envelope_id: Mapped[int] = mapped_column(ForeignKey("envelopes.id", ondelete="CASCADE"))
+    amount: Mapped[float] = mapped_column(Float)
+    reason: Mapped[Optional[str]] = mapped_column(String, nullable=True)
+    month: Mapped[str] = mapped_column(String)  # YYYY-MM
+    source: Mapped[str] = mapped_column(String, default="ai_interpreted")  # user_direct, ai_interpreted, ai_onboarding, migration
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+    envelope = relationship("Envelope")
+
+    __table_args__ = (
+        UniqueConstraint("envelope_id", "month", name="uq_envelope_month_sync"),
+    )
 

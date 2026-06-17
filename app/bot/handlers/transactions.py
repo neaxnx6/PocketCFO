@@ -9,8 +9,8 @@ from sqlalchemy.future import select
 from sqlalchemy import func, delete
 
 from app.database.session import async_session_maker
-from app.database.models import User, Transaction, Envelope, ChatMessage
-from app.database.query_helpers import get_monthly_payments, get_monthly_spending
+from app.database.models import User, Transaction, Envelope, ChatMessage, BudgetSyncAdjustment
+from app.database.query_helpers import get_monthly_payments, get_monthly_spending, get_monthly_adjustments
 from app.services.ai_brain import process_user_message, IncomeAllocation
 from app.services.voice_service import transcribe_voice
 
@@ -327,9 +327,15 @@ def get_envelope_due_status_str(e, spent_this_month: float, current_day: int) ->
                 return f"Просрочено на {current_day - due_day} дн. 🔴"
 
 
-def get_health_status(envelopes: list, monthly_payments: dict = None, monthly_spending: dict = None) -> str:
+def get_health_status(
+    envelopes: list, 
+    monthly_payments: dict = None, 
+    monthly_spending: dict = None,
+    monthly_adjustments: dict = None
+) -> str:
     monthly_payments = monthly_payments or {}
     monthly_spending = monthly_spending or {}
+    monthly_adjustments = monthly_adjustments or {}
     current_day = datetime.utcnow().day
     
     debt_envs = [e for e in envelopes if getattr(e, 'is_debt', False)]
@@ -351,7 +357,8 @@ def get_health_status(envelopes: list, monthly_payments: dict = None, monthly_sp
         if due_day is not None:
             target = getattr(e, 'target_amount', 0.0) or 0.0
             spent = monthly_spending.get(e.id, 0.0)
-            funded = getattr(e, 'current_amount', 0.0) + spent
+            adj = monthly_adjustments.get(e.id, 0.0)
+            funded = getattr(e, 'current_amount', 0.0) + spent + adj
             if funded < target and current_day > due_day:
                 overdue_envs.append(e)
                 
@@ -376,7 +383,8 @@ def get_health_status(envelopes: list, monthly_payments: dict = None, monthly_sp
         if get_envelope_group(e.name) in ("🏠 Жилье", "🍔 Еда", "🚗 Транспорт"):
             target = e.target_amount or 0.0
             spent = monthly_spending.get(e.id, 0.0)
-            funded = e.current_amount + spent
+            adj = monthly_adjustments.get(e.id, 0.0)
+            funded = e.current_amount + spent + adj
             if funded < target:
                 underfunded_base.append(e)
                 
@@ -524,9 +532,15 @@ def get_envelope_group(name: str) -> str:
     return "📦 Прочее"
 
 
-def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthly_spending: dict = None) -> str:
+def get_financial_insight(
+    envelopes: list, 
+    monthly_payments: dict = None, 
+    monthly_spending: dict = None,
+    monthly_adjustments: dict = None
+) -> str:
     monthly_payments = monthly_payments or {}
     monthly_spending = monthly_spending or {}
+    monthly_adjustments = monthly_adjustments or {}
     current_day = datetime.utcnow().day
 
     expense_envs = [
@@ -550,7 +564,8 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
         if due_day is not None:
             target = getattr(e, 'target_amount', 0.0) or 0.0
             spent = monthly_spending.get(e.id, 0.0)
-            funded = getattr(e, 'current_amount', 0.0) + spent
+            adj = monthly_adjustments.get(e.id, 0.0)
+            funded = getattr(e, 'current_amount', 0.0) + spent + adj
             if funded < target and current_day > due_day:
                 overdue_envs.append(e)
                 
@@ -565,7 +580,7 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
             if paid < min_pay and current_day > due_day:
                 overdue_envs.append(d)
 
-    # Underfunded Base (Level 1 - Жилье, Еда, Транспорт)
+    # Underfunded Base (Level 1 - Жилье, Еда, Transport)
     underfunded_base = []
     # Underfunded Other (Level 3 - Прочие)
     underfunded_other = []
@@ -575,7 +590,8 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
             needed = 0.0
         else:
             spent = monthly_spending.get(e.id, 0.0)
-            needed = max(0.0, (e.target_amount or 0.0) - (e.current_amount + spent))
+            adj = monthly_adjustments.get(e.id, 0.0)
+            needed = max(0.0, (e.target_amount or 0.0) - (e.current_amount + spent + adj))
         if needed > 0:
             if get_envelope_group(e.name) in ("🏠 Жилье", "🍔 Еда", "🚗 Транспорт"):
                 underfunded_base.append(e)
@@ -621,7 +637,8 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
                 overdue_list.append(f"{e.name} ({fmt_money(needed)})")
             else:
                 spent = monthly_spending.get(e.id, 0.0)
-                needed = max(0.0, (e.target_amount or 0.0) - (e.current_amount + spent))
+                adj = monthly_adjustments.get(e.id, 0.0)
+                needed = max(0.0, (e.target_amount or 0.0) - (e.current_amount + spent + adj))
                 total_overdue += needed
                 overdue_list.append(f"{e.name} ({fmt_money(needed)})")
         
@@ -630,7 +647,7 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
         reason = "Просрочка — это приоритет №1. Срочно внеси эти платежи, чтобы избежать штрафов, пени и ухудшения кредитной истории."
     elif underfunded_base:
         # Level 1
-        total_base_deficit = sum(max(0.0, (e.target_amount or 0.0) - (e.current_amount + monthly_spending.get(e.id, 0.0))) for e in underfunded_base)
+        total_base_deficit = sum(max(0.0, (e.target_amount or 0.0) - (e.current_amount + monthly_spending.get(e.id, 0.0) + monthly_adjustments.get(e.id, 0.0))) for e in underfunded_base)
         
         underfunded_groups = set()
         for e in underfunded_base:
@@ -797,7 +814,8 @@ def build_dashboard(
     monthly_income: float = 0.0, 
     tab: str = 'navigator', 
     monthly_payments: dict = None,
-    monthly_spending: dict = None
+    monthly_spending: dict = None,
+    monthly_adjustments: dict = None
 ) -> str:
     # Filter out categories
     expense_envs = [
@@ -813,6 +831,7 @@ def build_dashboard(
     
     monthly_payments = monthly_payments or {}
     monthly_spending = monthly_spending or {}
+    monthly_adjustments = monthly_adjustments or {}
     current_day = datetime.utcnow().day
 
     unallocated_amount = 0.0
@@ -825,14 +844,26 @@ def build_dashboard(
         return "Твой бюджет пока пуст. Расскажи, сколько зарабатываешь, какие есть обязательные расходы и долги, и я составлю финансовый план! 🚀"
 
     parts = []
+    current_month_str = datetime.utcnow().strftime("%Y-%m")
     
     # === ВКЛАДКА 1: НАВИГАТОР ===
     if tab == 'navigator':
-        expenses_obligations = sum(e.target_amount or 0.0 for e in expense_envs)
+        expenses_obligations = 0.0
+        funded_expenses = 0.0
+        for e in expense_envs:
+            spent = monthly_spending.get(e.id, 0.0)
+            adj = monthly_adjustments.get(e.id, 0.0)
+            rem_limit = max(0.0, (e.target_amount or 0.0) - (spent + adj))
+            expenses_obligations += rem_limit
+            
+            is_marked_paid = (getattr(e, 'last_paid_month', None) == current_month_str)
+            if is_marked_paid:
+                funded_expenses += rem_limit
+            else:
+                funded_expenses += min(rem_limit, e.current_amount)
         
         debts_obligations = 0.0
         funded_debts = 0.0
-        current_month_str = datetime.utcnow().strftime("%Y-%m")
         for d in debt_envs:
             rem_debt = (d.target_amount or 0.0) - d.current_amount
             paid = monthly_payments.get(d.id, 0.0)
@@ -849,16 +880,6 @@ def build_dashboard(
                 
         total_obligations = expenses_obligations + debts_obligations
         
-        funded_expenses = 0.0
-        for e in expense_envs:
-            target = e.target_amount or 0.0
-            spent = monthly_spending.get(e.id, 0.0)
-            is_marked_paid = (getattr(e, 'last_paid_month', None) == current_month_str)
-            if is_marked_paid:
-                funded_expenses += target
-            else:
-                funded_expenses += min(target, max(0.0, e.current_amount + spent))
-            
         total_funded_in_envelopes = funded_expenses + funded_debts
         total_funded = total_funded_in_envelopes + unallocated_amount
         if total_obligations > 0:
@@ -870,7 +891,7 @@ def build_dashboard(
         
         parts.append("📍 <b>ВКЛАДКА: НАВИГАТОР</b>\n")
         parts.append(f"📊 <b>Обеспеченность месяца:</b> <b>{coverage_pct}%</b>")
-        parts.append(get_health_status(envelopes, monthly_payments, monthly_spending))
+        parts.append(get_health_status(envelopes, monthly_payments, monthly_spending, monthly_adjustments))
         parts.append("")  # Empty line
         
         total_in_envelopes = sum(e.current_amount for e in expense_envs) + sum(e.current_amount for e in goal_envs)
@@ -901,7 +922,7 @@ def build_dashboard(
         )
         parts.append("")
         
-        insight = get_financial_insight(envelopes, monthly_payments, monthly_spending)
+        insight = get_financial_insight(envelopes, monthly_payments, monthly_spending, monthly_adjustments)
         if insight:
             parts.append(insight)
 
@@ -922,7 +943,6 @@ def build_dashboard(
                 groups[grp].append(e)
                 
             parts.append("🛍 <b>Расходы по категориям:</b>")
-            current_month_str = datetime.utcnow().strftime("%Y-%m")
             for grp_name, envs in groups.items():
                 if not envs:
                     continue
@@ -936,9 +956,11 @@ def build_dashboard(
                     if target > 0:
                         total_count += 1
                         spent = monthly_spending.get(e.id, 0.0) if monthly_spending else 0.0
+                        adj_val = monthly_adjustments.get(e.id, 0.0)
+                        rem_limit = max(0.0, target - (spent + adj_val))
                         is_settled = (
                             getattr(e, 'last_paid_month', None) == current_month_str 
-                            or (e.current_amount + spent) >= target
+                            or e.current_amount >= rem_limit
                         )
                         if is_settled:
                             settled_count += 1
@@ -951,7 +973,7 @@ def build_dashboard(
                         status_suffix = f" <b>[Оплачено {settled_count}/{total_count}]</b>"
                 
                 limit_str = f" из <b>{fmt_money(grp_limit)}</b>" if grp_limit > 0 else ""
-                parts.append(f"• {grp_name}{status_suffix}: доступно <b>{fmt_money(grp_available)}</b>{limit_str}")
+                parts.append(f"• {grp_name}{status_suffix}: на балансе <b>{fmt_money(grp_available)}</b>{limit_str}")
             
         if goal_envs:
             goal_lines = []
@@ -1112,13 +1134,15 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 envelope_ids = [e.id for e in envelopes]
                 monthly_payments = await get_monthly_payments(session, envelope_ids)
                 monthly_spending = await get_monthly_spending(session, envelope_ids)
+                monthly_adjustments = await get_monthly_adjustments(session, envelope_ids)
                 
                 dashboard = build_dashboard(
                     envelopes, 
                     monthly_income=budget_owner.monthly_income or 0,
                     tab=tab,
                     monthly_payments=monthly_payments,
-                    monthly_spending=monthly_spending
+                    monthly_spending=monthly_spending,
+                    monthly_adjustments=monthly_adjustments
                 )
                 
                 session.add(ChatMessage(user_id=user.telegram_id, role="assistant", content=dashboard))
@@ -1283,6 +1307,52 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                         extra_reply_parts.append(
                             f"✅ Отметил статью <b>«{env.name}»</b> как оплаченную за этот месяц."
                         )
+
+            if getattr(brain_response, 'sync_adjustments', None):
+                current_month_str = datetime.utcnow().strftime("%Y-%m")
+                for adj in brain_response.sync_adjustments:
+                    env = _find_envelope(envelopes, adj.envelope_name)
+                    if env:
+                        amount = 0.0
+                        if adj.used_fraction is not None:
+                            fraction = max(0.0, min(1.0, adj.used_fraction))
+                            amount = (env.target_amount or 0.0) * fraction
+                        elif adj.amount is not None:
+                            amount = max(0.0, min(env.target_amount or 0.0, adj.amount))
+                        
+                        if amount > 0:
+                            existing_stmt = await session.execute(
+                                select(BudgetSyncAdjustment)
+                                .where(BudgetSyncAdjustment.envelope_id == env.id)
+                                .where(BudgetSyncAdjustment.month == current_month_str)
+                            )
+                            existing_adj = existing_stmt.scalar_one_or_none()
+                            if existing_adj:
+                                existing_adj.amount = amount
+                                existing_adj.source = "ai_interpreted"
+                            else:
+                                new_adj = BudgetSyncAdjustment(
+                                    envelope_id=env.id,
+                                    amount=amount,
+                                    month=current_month_str,
+                                    source="ai_interpreted",
+                                    reason="Синхронизация бюджета"
+                                )
+                                session.add(new_adj)
+                            
+                            extra_reply_parts.append(
+                                f"🔄 Синхронизировал бюджет: в статье <b>«{env.name}»</b> отмечено использованными <b>{fmt_money(amount)}</b> за прошедшую часть месяца (без списания с баланса)."
+                            )
+                        else:
+                            await session.execute(
+                                delete(BudgetSyncAdjustment)
+                                .where(BudgetSyncAdjustment.envelope_id == env.id)
+                                .where(BudgetSyncAdjustment.month == current_month_str)
+                            )
+                            extra_reply_parts.append(
+                                f"🔄 Сбросил синхронизацию для статьи <b>«{env.name}»</b>."
+                            )
+
             show_envelopes_button = False
 
             is_already_confirming = False
@@ -1683,13 +1753,15 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 envelope_ids2 = [e.id for e in fresh_envelopes]
                 monthly_payments2 = await get_monthly_payments(session, envelope_ids2)
                 monthly_spending2 = await get_monthly_spending(session, envelope_ids2)
+                monthly_adjustments2 = await get_monthly_adjustments(session, envelope_ids2)
                 
                 brain_response.coach_reply += "\n\n" + build_dashboard(
                     fresh_envelopes, 
                     monthly_income=budget_owner.monthly_income or 0, 
                     tab='navigator',
                     monthly_payments=monthly_payments2,
-                    monthly_spending=monthly_spending2
+                    monthly_spending=monthly_spending2,
+                    monthly_adjustments=monthly_adjustments2
                 )
             elif brain_response.intent == "transaction" and brain_response.transactions:
                 await session.flush()
@@ -2092,16 +2164,32 @@ async def show_group_details(callback: CallbackQuery):
         
         envelope_ids = [e.id for e in grp_envs]
         monthly_spending = await get_monthly_spending(session, envelope_ids)
+        monthly_adjustments = await get_monthly_adjustments(session, envelope_ids)
         current_day = datetime.utcnow().day
+        current_month_str = datetime.utcnow().strftime("%Y-%m")
         
         lines = []
         for e in grp_envs:
-            limit_str = f" из <b>{fmt_money(e.target_amount or 0)}</b>" if e.target_amount else ""
             spent = monthly_spending.get(e.id, 0.0)
+            adj_val = monthly_adjustments.get(e.id, 0.0)
+            remaining_limit = max(0.0, (e.target_amount or 0.0) - (spent + adj_val))
+            
+            limit_str = f" из <b>{fmt_money(e.target_amount or 0)}</b>" if e.target_amount else ""
             status = get_envelope_due_status_str(e, spent, current_day)
-            status_suffix = f" — <i>{status}</i>" if status else ""
+            
+            is_marked_paid = (getattr(e, 'last_paid_month', None) == current_month_str)
+            if is_marked_paid:
+                status_suffix = " <b>[Оплачено ✅]</b>"
+            elif e.target_amount and e.current_amount >= remaining_limit:
+                status_suffix = " <b>[Оплачено ✅]</b>"
+            else:
+                status_suffix = f" — <i>{status}</i>" if status else ""
+                
             due_str = f" (до {e.due_day}-го)" if e.due_day else ""
-            lines.append(f"• {e.name}{due_str}: доступно <b>{fmt_money(e.current_amount)}</b>{limit_str}{status_suffix}")
+            lines.append(
+                f"• {e.name}{due_str}: осталось учесть <b>{fmt_money(remaining_limit)}</b>{limit_str} "
+                f"(на балансе: <b>{fmt_money(e.current_amount)}</b> | 🔄 до старта: <b>{fmt_money(adj_val)}</b>){status_suffix}"
+            )
             
         text = (
             f"🔍 <b>Детализация категории: {grp_name}</b>\n\n"
@@ -2138,13 +2226,15 @@ async def back_to_expenses_callback(callback: CallbackQuery):
         envelope_ids = [e.id for e in envelopes]
         monthly_payments = await get_monthly_payments(session, envelope_ids)
         monthly_spending = await get_monthly_spending(session, envelope_ids)
+        monthly_adjustments = await get_monthly_adjustments(session, envelope_ids)
         
         dashboard = build_dashboard(
             envelopes, 
             monthly_income=budget_owner.monthly_income or 0,
             tab='expenses',
             monthly_payments=monthly_payments,
-            monthly_spending=monthly_spending
+            monthly_spending=monthly_spending,
+            monthly_adjustments=monthly_adjustments
         )
         
         expense_envs = [
@@ -2209,6 +2299,7 @@ async def show_envelopes_callback(callback):
         envelope_ids = [e.id for e in envelopes]
         monthly_payments = await get_monthly_payments(session, envelope_ids)
         monthly_spending = await get_monthly_spending(session, envelope_ids)
+        monthly_adjustments = await get_monthly_adjustments(session, envelope_ids)
 
     if not envelopes:
         await callback.answer("Бюджет пока пуст")
@@ -2219,7 +2310,8 @@ async def show_envelopes_callback(callback):
         monthly_income=monthly_income, 
         tab='navigator', 
         monthly_payments=monthly_payments,
-        monthly_spending=monthly_spending
+        monthly_spending=monthly_spending,
+        monthly_adjustments=monthly_adjustments
     )
     
     reply_markup = None

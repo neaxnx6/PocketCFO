@@ -381,3 +381,120 @@ async def test_direct_envelope_income(test_session_maker, mock_message, mock_sta
         assert txs[1].amount == 5000.0
         assert txs[2].envelope_id == food_db.id
         assert txs[2].amount == -5000.0
+
+
+from app.database.models import BudgetSyncAdjustment
+from app.services.ai_brain import SyncAdjustmentItem
+
+@pytest.mark.asyncio
+async def test_sync_adjustments_clamping_and_upsert(test_session_maker, mock_message, mock_state, monkeypatch):
+    monkeypatch.setattr("app.bot.handlers.transactions.async_session_maker", lambda: test_session_maker())
+
+    # 1. Setup user, envelopes
+    async with test_session_maker() as session:
+        user = User(telegram_id=12345, invite_code="CF-12345")
+        unallocated = Envelope(user_id=12345, name="Нераспределённые", current_amount=10000.0)
+        food = Envelope(user_id=12345, name="Продукты", current_amount=0.0, target_amount=30000.0)
+        session.add_all([user, unallocated, food])
+        await session.flush()
+        
+        tx1 = Transaction(user_id=12345, amount=10000.0, envelope_id=unallocated.id, description="Старт")
+        session.add_all([tx1])
+        await session.commit()
+
+    # 2. Mock AI response for sync_adjustments with fraction = 1.5 (must be clamped to 1.0 -> 30000.0)
+    brain_resp1 = BrainResponse(
+        thoughts="Sync adjustment fraction 1.5",
+        intent="chat",
+        sync_adjustments=[
+            SyncAdjustmentItem(envelope_name="Продукты", used_fraction=1.5)
+        ],
+        show_dashboard=True,
+        coach_reply="Учел 1.5 от лимита продуктов."
+    )
+
+    async def mock_process1(*args, **kwargs):
+        return brain_resp1
+
+    monkeypatch.setattr("app.bot.handlers.transactions.process_user_message", mock_process1)
+
+    # Process first adjustment
+    await handle_transaction(mock_message, "синхронизация продуктов 1.5", state=mock_state)
+
+    # Verify first adjustment was saved and clamped to target_amount (30000.0)
+    async with test_session_maker() as session:
+        adj_res = await session.execute(select(BudgetSyncAdjustment))
+        adjs = list(adj_res.scalars().all())
+        assert len(adjs) == 1
+        assert adjs[0].amount == 30000.0
+        assert adjs[0].source == "ai_interpreted"
+
+    # 3. Mock AI response for sync_adjustments with amount = 15000.0 (upsert test)
+    brain_resp2 = BrainResponse(
+        thoughts="Sync adjustment amount 15000",
+        intent="chat",
+        sync_adjustments=[
+            SyncAdjustmentItem(envelope_name="Продукты", amount=15000.0)
+        ],
+        show_dashboard=True,
+        coach_reply="Скорректировал продукты на 15000."
+    )
+
+    async def mock_process2(*args, **kwargs):
+        return brain_resp2
+
+    monkeypatch.setattr("app.bot.handlers.transactions.process_user_message", mock_process2)
+
+    # Process second adjustment (for the same envelope and month)
+    await handle_transaction(mock_message, "синхронизация продуктов 15000", state=mock_state)
+
+    # Verify upsert: still only 1 record, amount updated to 15000.0
+    async with test_session_maker() as session:
+        adj_res = await session.execute(select(BudgetSyncAdjustment))
+        adjs = list(adj_res.scalars().all())
+        assert len(adjs) == 1
+        assert adjs[0].amount == 15000.0
+
+    # 4. Mock AI response for sync_adjustments with amount = 0.0 (deletion test)
+    brain_resp3 = BrainResponse(
+        thoughts="Reset sync adjustment",
+        intent="chat",
+        sync_adjustments=[
+            SyncAdjustmentItem(envelope_name="Продукты", amount=0.0)
+        ],
+        show_dashboard=True,
+        coach_reply="Сбросил синхронизацию продуктов."
+    )
+
+    async def mock_process3(*args, **kwargs):
+        return brain_resp3
+
+    monkeypatch.setattr("app.bot.handlers.transactions.process_user_message", mock_process3)
+
+    # Process reset adjustment
+    await handle_transaction(mock_message, "сбрось продукты", state=mock_state)
+
+    # Verify deletion: 0 records
+    async with test_session_maker() as session:
+        adj_res = await session.execute(select(BudgetSyncAdjustment))
+        adjs = list(adj_res.scalars().all())
+        assert len(adjs) == 0
+
+
+def test_sync_adjustment_item_validation():
+    # Valid cases
+    item1 = SyncAdjustmentItem(envelope_name="Продукты", amount=1000.0)
+    assert item1.amount == 1000.0
+    assert item1.used_fraction is None
+
+    item2 = SyncAdjustmentItem(envelope_name="Продукты", used_fraction=0.5)
+    assert item2.used_fraction == 0.5
+    assert item2.amount is None
+
+    # Invalid case: both set
+    with pytest.raises(ValueError, match="Укажи либо amount, либо used_fraction, но не оба одновременно."):
+        SyncAdjustmentItem(envelope_name="Продукты", amount=1000.0, used_fraction=0.5)
+
+    # Invalid case: neither set
+    with pytest.raises(ValueError, match="Укажи либо amount, либо used_fraction."):
+        SyncAdjustmentItem(envelope_name="Продукты")

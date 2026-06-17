@@ -1,6 +1,6 @@
 from datetime import datetime
 from sqlalchemy import select, func
-from app.database.models import Transaction
+from app.database.models import Transaction, BudgetSyncAdjustment
 
 async def get_monthly_payments(session, envelope_ids: list[int]) -> dict[int, float]:
     """
@@ -46,3 +46,22 @@ async def get_monthly_spending(session, envelope_ids: list[int]) -> dict[int, fl
     )
     result = await session.execute(stmt)
     return {env_id: abs(amount) for env_id, amount in result.all() if env_id is not None}
+
+
+async def get_monthly_adjustments(session, envelope_ids: list[int]) -> dict[int, float]:
+    """
+    Retrieves active BudgetSyncAdjustment amounts for each envelope for the current month.
+    """
+    if not envelope_ids:
+        return {}
+    current_month_str = datetime.utcnow().strftime("%Y-%m")
+    stmt = (
+        select(BudgetSyncAdjustment.envelope_id, BudgetSyncAdjustment.amount)
+        .where(
+            BudgetSyncAdjustment.envelope_id.in_(envelope_ids),
+            BudgetSyncAdjustment.month == current_month_str
+        )
+    )
+    result = await session.execute(stmt)
+    return {env_id: amount for env_id, amount in result.all() if env_id is not None}
+

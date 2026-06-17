@@ -1,5 +1,5 @@
 import json
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from typing import Optional, List
 from litellm import acompletion
 from app.config import settings
@@ -32,6 +32,22 @@ class TransactionItem(BaseModel):
     category: Optional[str] = None
 
 
+class SyncAdjustmentItem(BaseModel):
+    envelope_name: str
+    amount: Optional[float] = Field(default=None, description="Точная сумма в рублях, если указана")
+    used_fraction: Optional[float] = Field(default=None, description="Доля уже потраченного лимита (например, 0.5 для половины)")
+
+    @model_validator(mode="after")
+    def check_either_or(self):
+        amount_set = self.amount is not None
+        fraction_set = self.used_fraction is not None
+        if amount_set and fraction_set:
+            raise ValueError("Укажи либо amount, либо used_fraction, но не оба одновременно.")
+        if not amount_set and not fraction_set:
+            raise ValueError("Укажи либо amount, либо used_fraction.")
+        return self
+
+
 class BrainResponse(BaseModel):
     thoughts: str = Field(default="", description="Черновик. Считай пошагово. Проверяй: Сумма плана <= free_cash?")
     intent: str = Field(description="'transaction'|'profile_update'|'chat'")
@@ -44,6 +60,7 @@ class BrainResponse(BaseModel):
     show_dashboard: bool = Field(default=False)
     envelopes_to_mark_paid: Optional[List[str]] = Field(default=None, description="Список названий конвертов, которые нужно пометить как оплаченные в этом месяце")
     pending_paid_confirmations: Optional[List[str]] = Field(default=None, description="Список имен конвертов, для которых нужно спросить подтверждение оплаты лимита (если пользователь сообщил о факте оплаты, но не указал сумму)")
+    sync_adjustments: Optional[List[SyncAdjustmentItem]] = Field(default=None, description="Список корректировок бюджета (уже потрачено в текущем месяце вне бота)")
     coach_reply: str = Field(description="Ответ. Теги <b>,<i>. Переносы \\n")
 
 
@@ -106,15 +123,13 @@ SYSTEM_PROMPT_BODY = """\
    Если в сообщении пользователя нет конкретной числовой суммы, тебе КАТЕГОРИЧЕСКИ ЗАПРЕЩЕНО создавать транзакцию или угадывать сумму (вместо этого переспроси точную сумму).
    ИСКЛЮЧЕНИЯ:
    1. Если пользователь сообщает, что счет/конверт "уже оплачен" без указания суммы — используй правило «УЖЕ ОПЛАЧЕНО» ниже (intent='chat' + pending_paid_confirmations).
-   2. Если пользователь указывает относительную долю от лимита конверта (например: 'половина продуктов', 'треть коммуналки', '50% от лимита на спорт', 'полмесяца прошло, поэтому половину продуктов можно закрыть'), ты ОБЯЗАН:
-      а) Найти соответствующий конверт в ТВОИ КОНВЕРТЫ и взять его target_amount (лимит).
-      б) Если target_amount > 0, математически рассчитать сумму (например, половина от 20 000 ₽ = 10 000 ₽).
-      в) Если пользователь имеет в виду, что эта сумма была потрачена в прошлом/до начала ведения бота/в прошедшей половине месяца (например: "полмесяца прошло, половину продуктов закрываем", "уже потратил до бота"), ты ОБЯЗАН создать ДВЕ транзакции:
-          - Приход в конверт: {"action": "income", "amount": рассчитанная_сумма, "target_envelope_name": "имя_конверта"}
-          - Расход из конверта: {"action": "expense", "amount": рассчитанная_сумма, "target_envelope_name": "имя_конверта"}
-          Это зафиксирует трату без влияния на свободный кэш (Нераспределённые).
-      г) Если это обычная текущая трата, создай одну транзакцию: {"action": "expense", "amount": рассчитанная_сумма, "target_envelope_name": "имя_конверта"}.
-      д) Если у конверта не установлен лимит (target_amount равен 0 или отсутствует), выбери intent="chat" и в coach_reply вежливо напиши, что лимит для этой статьи не задан, и попроси указать точную сумму.
+   2. Если пользователь указывает относительную долю или точную сумму трат, совершенных в прошлом (до начала ведения учета / до бота / в прошедшей половине месяца) (например: 'половина продуктов', 'треть коммуналки', '50% от лимита на спорт', 'полмесяца прошло, поэтому половину продуктов можно закрыть', 'уже потратил 10к на продукты до бота'), ты ОБЯЗАН:
+      а) Найти соответствующий конверт в ТВОИ КОНВЕРТЫ.
+      б) Заполнить массив `sync_adjustments` объектом, указав `envelope_name`. При этом заполни либо `used_fraction` (например, 0.5 для половины, 0.33 для трети), либо `amount` (если названа точная сумма), но ни в коем случае не оба одновременно.
+      в) ИИ сам сумму по долям НЕ вычисляет. Оставь расчет Python.
+      г) Выбрать `intent = "chat"`. Не создавай при этом никаких транзакций в массиве `transactions`.
+   3. Если пользователь указывает относительную долю от лимита для обычной текущей траты (не в прошлом), ты обязан взять target_amount конверта из контекста, рассчитать сумму (например, 50% от 20 000 = 10 000) и создать обычную транзакцию: intent="transaction", transactions=[{"action": "expense", "amount": рассчитанная_сумма, "target_envelope_name": "имя_конверта"}]. Если лимит не установлен, выбери intent="chat" и вежливо попроси указать точную сумму.
+   4. Если пользователь просит сбросить или отменить синхронизацию (например, "сбрось синхронизацию продуктов"), ты обязан заполнить массив `sync_adjustments` объектом с `envelope_name` и `amount = 0.0`, выбрав `intent = "chat"`.
   🛑 ПРАВИЛО «УЖЕ ОПЛАЧЕНО» (без фиктивных денег/транзакций):
    Если пользователь сообщает, что один или несколько счетов/конвертов (например, аренда, интернет, коммуналка, кредитка) "уже оплачены" (или "оплатил" без указания суммы):
    1. НИ В КОЕМ СЛУЧАЕ НЕ СОЗДАВАЙ фиктивные приходы или расходы в массиве `transactions` (чтобы не искажать реальную историю и баланс).
