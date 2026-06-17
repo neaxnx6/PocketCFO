@@ -288,14 +288,14 @@ def get_sorting_priority(e, current_day: int, monthly_payments: dict, monthly_sp
 def get_envelope_due_status_str(e, spent_this_month: float, current_day: int) -> str:
     current_month_str = datetime.utcnow().strftime("%Y-%m")
     if getattr(e, 'last_paid_month', None) == current_month_str:
-        return "Оплачено в этом месяце ✅"
+        return "Оплачено ✅"
 
     due_day = getattr(e, 'due_day', None)
     if getattr(e, 'is_debt', False):
         min_pay = getattr(e, 'min_payment', 0.0) or 0.0
         if min_pay > 0:
             if spent_this_month >= min_pay:
-                return "Оплачено в этом месяце ✅"
+                return "Оплачено ✅"
             else:
                 if due_day is None:
                     return ""
@@ -313,7 +313,7 @@ def get_envelope_due_status_str(e, spent_this_month: float, current_day: int) ->
         funded = getattr(e, 'current_amount', 0.0) + spent_this_month
         if funded >= target:
             if spent_this_month > 0:
-                return "Оплачено в этом месяце ✅"
+                return "Оплачено ✅"
             else:
                 return "🟢 Обеспечено"
         else:
@@ -631,9 +631,30 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
     elif underfunded_base:
         # Level 1
         total_base_deficit = sum(max(0.0, (e.target_amount or 0.0) - (e.current_amount + monthly_spending.get(e.id, 0.0))) for e in underfunded_base)
+        
+        underfunded_groups = set()
+        for e in underfunded_base:
+            grp = get_envelope_group(e.name)
+            if grp == "🏠 Жилье":
+                underfunded_groups.add("жилье")
+            elif grp == "🍔 Еда":
+                underfunded_groups.add("еду")
+            elif grp == "🚗 Транспорт" or grp == "🚗 Траспорт":
+                underfunded_groups.add("транспорт")
+                
+        groups_list = sorted(list(underfunded_groups))
+        if len(groups_list) == 1:
+            groups_str = groups_list[0]
+        elif len(groups_list) == 2:
+            groups_str = f"{groups_list[0]} и {groups_list[1]}"
+        elif len(groups_list) == 3:
+            groups_str = f"{groups_list[0]}, {groups_list[1]} и {groups_list[2]}"
+        else:
+            groups_str = "базовые нужды"
+            
         header = "🔥 <b>Следующий шаг (Выживание)</b>"
-        desc = f"Для спокойного прохождения месяца пока не хватает <b>{fmt_money(total_base_deficit)}</b> на жилье, еду и транспорт."
-        reason = "Сначала закрываем базовые нужды (жилье, еду, транспорт), чтобы обеспечить безопасность. После этого перейдем к обязательным платежам по кредитам."
+        desc = f"Для спокойного прохождения месяца пока не хватает <b>{fmt_money(total_base_deficit)}</b> на {groups_str}."
+        reason = f"Сначала закрываем базовые нужды ({groups_str}), чтобы обеспечить безопасность. После этого перейдем к обязательным платежам по кредитам."
     elif underfunded_mins:
         # Level 2
         total_min_deficit = sum(needed for d, needed in underfunded_mins)
@@ -901,14 +922,36 @@ def build_dashboard(
                 groups[grp].append(e)
                 
             parts.append("🛍 <b>Расходы по категориям:</b>")
+            current_month_str = datetime.utcnow().strftime("%Y-%m")
             for grp_name, envs in groups.items():
                 if not envs:
                     continue
                 grp_available = sum(e.current_amount for e in envs)
                 grp_limit = sum(e.target_amount or 0.0 for e in envs)
                 
+                settled_count = 0
+                total_count = 0
+                for e in envs:
+                    target = e.target_amount or 0.0
+                    if target > 0:
+                        total_count += 1
+                        spent = monthly_spending.get(e.id, 0.0) if monthly_spending else 0.0
+                        is_settled = (
+                            getattr(e, 'last_paid_month', None) == current_month_str 
+                            or (e.current_amount + spent) >= target
+                        )
+                        if is_settled:
+                            settled_count += 1
+                            
+                status_suffix = ""
+                if total_count > 0:
+                    if settled_count == total_count:
+                        status_suffix = " <b>[Оплачено ✅]</b>"
+                    elif settled_count > 0:
+                        status_suffix = f" <b>[Оплачено {settled_count}/{total_count}]</b>"
+                
                 limit_str = f" из <b>{fmt_money(grp_limit)}</b>" if grp_limit > 0 else ""
-                parts.append(f"• {grp_name}: доступно <b>{fmt_money(grp_available)}</b>{limit_str}")
+                parts.append(f"• {grp_name}{status_suffix}: доступно <b>{fmt_money(grp_available)}</b>{limit_str}")
             
         if goal_envs:
             goal_lines = []

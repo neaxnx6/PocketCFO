@@ -63,7 +63,7 @@ def test_build_dashboard_expenses():
     monthly_payments = {2: 2000.0}
     result = build_dashboard(envelopes, monthly_income=70000, tab='expenses', monthly_payments=monthly_payments, monthly_spending={})
     assert "ВКЛАДКА: РАСХОДЫ" in result
-    assert "🏠 Жилье: доступно <b>35к</b> из <b>35к</b>" in result
+    assert "🏠 Жилье <b>[Оплачено ✅]</b>: доступно <b>35к</b> из <b>35к</b>" in result
     assert "Кредитка (обязательный платеж): оплачено <b>2к</b> из <b>5к</b>" in result
 
 def test_build_dashboard_debts():
@@ -161,7 +161,7 @@ def test_absolute_due_days_and_last_paid_month():
     # 3. Verify marked paid status on "Интернет"
     from app.bot.handlers.transactions import get_envelope_due_status_str
     status = get_envelope_due_status_str(envelopes[2], spent_this_month=0.0, current_day=datetime.utcnow().day)
-    assert status == "Оплачено в этом месяце ✅"
+    assert status == "Оплачено ✅"
     
     # 4. Verify navigator math for marked paid envelope:
     result_nav = build_dashboard(envelopes, monthly_income=50000, tab='navigator', monthly_payments={}, monthly_spending={})
