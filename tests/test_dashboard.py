@@ -10,7 +10,8 @@ class MockEnvelope:
         is_debt: bool = False, 
         is_goal: bool = False, 
         min_payment: float = 0.0,
-        due_day: int = None
+        due_day: int = None,
+        last_paid_month: str = None
     ):
         self.id = id
         self.name = name
@@ -20,6 +21,7 @@ class MockEnvelope:
         self.is_goal = is_goal
         self.min_payment = min_payment
         self.due_day = due_day
+        self.last_paid_month = last_paid_month
 
 class MockTx:
     def __init__(self, target_envelope_name: str):
@@ -135,3 +137,34 @@ def test_due_date_sorting_and_overdue():
     assert "Пожар" in dashboard_nav
     assert "Аренда" in dashboard_nav
     assert "Кредитка Сбер" in dashboard_nav
+
+
+def test_absolute_due_days_and_last_paid_month():
+    from datetime import datetime
+    current_month_str = datetime.utcnow().strftime("%Y-%m")
+    
+    envelopes = [
+        MockEnvelope(1, "Аренда", 0, 35000, is_debt=False, is_goal=False, due_day=15),
+        MockEnvelope(2, "Кредитка Сбер", 0, 50000, is_debt=True, is_goal=False, min_payment=5000, due_day=23),
+        MockEnvelope(3, "Интернет", 0, 1500, is_debt=False, is_goal=False, due_day=10, last_paid_month=current_month_str),
+        MockEnvelope(4, "Нераспределённые", 0, 0, is_debt=False, is_goal=False),
+    ]
+
+    # 1. Verify absolute due days display in Debts tab
+    result_debts = build_dashboard(envelopes, monthly_income=50000, tab='debts', monthly_payments={}, monthly_spending={})
+    assert "Кредитка Сбер (до 23-го):" in result_debts
+    
+    # 2. Verify absolute due days display in Expenses tab (mandatory payments)
+    result_expenses = build_dashboard(envelopes, monthly_income=50000, tab='expenses', monthly_payments={}, monthly_spending={})
+    assert "Кредитка Сбер (до 23-го) (обязательный платеж):" in result_expenses
+    
+    # 3. Verify marked paid status on "Интернет"
+    from app.bot.handlers.transactions import get_envelope_due_status_str
+    status = get_envelope_due_status_str(envelopes[2], spent_this_month=0.0, current_day=datetime.utcnow().day)
+    assert status == "Оплачено в этом месяце ✅"
+    
+    # 4. Verify navigator math for marked paid envelope:
+    result_nav = build_dashboard(envelopes, monthly_income=50000, tab='navigator', monthly_payments={}, monthly_spending={})
+    assert "ОБЯЗАТЕЛЬСТВА:</b> <b>41.5к</b>" in result_nav
+    assert "Обеспечено: <b>1.5к</b>" in result_nav
+    assert "Не хватает: <b>40к</b>" in result_nav

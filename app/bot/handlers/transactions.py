@@ -48,6 +48,7 @@ def _is_dashboard_request(text: str) -> bool:
 
 class IncomeStates(StatesGroup):
     confirming = State()
+    confirming_paid_limit = State()
 
 
 async def verify_user_ledger(session, user_id: int) -> bool:
@@ -262,6 +263,10 @@ def get_sorting_priority(e, current_day: int, monthly_payments: dict, monthly_sp
     if due_day is None:
         return 999
         
+    current_month_str = datetime.utcnow().strftime("%Y-%m")
+    if getattr(e, 'last_paid_month', None) == current_month_str:
+        return 999
+
     if getattr(e, 'is_debt', False):
         paid = monthly_payments.get(e.id, 0.0)
         min_pay = getattr(e, 'min_payment', 0.0) or 0.0
@@ -281,6 +286,10 @@ def get_sorting_priority(e, current_day: int, monthly_payments: dict, monthly_sp
 
 
 def get_envelope_due_status_str(e, spent_this_month: float, current_day: int) -> str:
+    current_month_str = datetime.utcnow().strftime("%Y-%m")
+    if getattr(e, 'last_paid_month', None) == current_month_str:
+        return "Оплачено в этом месяце ✅"
+
     due_day = getattr(e, 'due_day', None)
     if getattr(e, 'is_debt', False):
         min_pay = getattr(e, 'min_payment', 0.0) or 0.0
@@ -333,8 +342,11 @@ def get_health_status(envelopes: list, monthly_payments: dict = None, monthly_sp
     ]
     
     # Check for Level 0 - Overdue (Пожар)
+    current_month_str = datetime.utcnow().strftime("%Y-%m")
     overdue_envs = []
     for e in expense_envs:
+        if getattr(e, 'last_paid_month', None) == current_month_str:
+            continue
         due_day = getattr(e, 'due_day', None)
         if due_day is not None:
             target = getattr(e, 'target_amount', 0.0) or 0.0
@@ -344,6 +356,8 @@ def get_health_status(envelopes: list, monthly_payments: dict = None, monthly_sp
                 overdue_envs.append(e)
                 
     for d in debt_envs:
+        if getattr(d, 'last_paid_month', None) == current_month_str:
+            continue
         rem = (getattr(d, 'target_amount', 0.0) or 0.0) - getattr(d, 'current_amount', 0.0)
         due_day = getattr(d, 'due_day', None)
         if rem > 0 and due_day is not None:
@@ -527,8 +541,11 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
     buffer_env = next((e for e in envelopes if "буфер" in e.name.lower()), None)
 
     # Check for overdue envelopes (Level 0 - Пожар)
+    current_month_str = datetime.utcnow().strftime("%Y-%m")
     overdue_envs = []
     for e in expense_envs:
+        if getattr(e, 'last_paid_month', None) == current_month_str:
+            continue
         due_day = getattr(e, 'due_day', None)
         if due_day is not None:
             target = getattr(e, 'target_amount', 0.0) or 0.0
@@ -538,6 +555,8 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
                 overdue_envs.append(e)
                 
     for d in debt_envs:
+        if getattr(d, 'last_paid_month', None) == current_month_str:
+            continue
         rem_debt = (getattr(d, 'target_amount', 0.0) or 0.0) - getattr(d, 'current_amount', 0.0)
         due_day = getattr(d, 'due_day', None)
         if rem_debt > 0 and due_day is not None:
@@ -552,8 +571,11 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
     underfunded_other = []
     
     for e in expense_envs:
-        spent = monthly_spending.get(e.id, 0.0)
-        needed = max(0.0, (e.target_amount or 0.0) - (e.current_amount + spent))
+        if getattr(e, 'last_paid_month', None) == current_month_str:
+            needed = 0.0
+        else:
+            spent = monthly_spending.get(e.id, 0.0)
+            needed = max(0.0, (e.target_amount or 0.0) - (e.current_amount + spent))
         if needed > 0:
             if get_envelope_group(e.name) in ("🏠 Жилье", "🍔 Еда", "🚗 Транспорт"):
                 underfunded_base.append(e)
@@ -565,6 +587,8 @@ def get_financial_insight(envelopes: list, monthly_payments: dict = None, monthl
     active_debts = []
     for d in debt_envs:
         rem_debt = (d.target_amount or 0.0) - d.current_amount
+        if getattr(d, 'last_paid_month', None) == current_month_str:
+            rem_debt = 0.0
         if rem_debt > 0:
             active_debts.append(d)
             min_pay = d.min_payment or 0.0
@@ -787,6 +811,7 @@ def build_dashboard(
         
         debts_obligations = 0.0
         funded_debts = 0.0
+        current_month_str = datetime.utcnow().strftime("%Y-%m")
         for d in debt_envs:
             rem_debt = (d.target_amount or 0.0) - d.current_amount
             paid = monthly_payments.get(d.id, 0.0)
@@ -794,7 +819,12 @@ def build_dashboard(
                 min_pay = d.min_payment or 0.0
                 effective_obligation = min(min_pay, max(0.0, rem_debt + paid))
                 debts_obligations += effective_obligation
-                funded_debts += min(effective_obligation, paid)
+                
+                is_marked_paid = (getattr(d, 'last_paid_month', None) == current_month_str)
+                if is_marked_paid:
+                    funded_debts += effective_obligation
+                else:
+                    funded_debts += min(effective_obligation, paid)
                 
         total_obligations = expenses_obligations + debts_obligations
         
@@ -802,7 +832,11 @@ def build_dashboard(
         for e in expense_envs:
             target = e.target_amount or 0.0
             spent = monthly_spending.get(e.id, 0.0)
-            funded_expenses += min(target, max(0.0, e.current_amount + spent))
+            is_marked_paid = (getattr(e, 'last_paid_month', None) == current_month_str)
+            if is_marked_paid:
+                funded_expenses += target
+            else:
+                funded_expenses += min(target, max(0.0, e.current_amount + spent))
             
         total_funded_in_envelopes = funded_expenses + funded_debts
         total_funded = total_funded_in_envelopes + unallocated_amount
@@ -891,7 +925,8 @@ def build_dashboard(
                 paid_min = min(paid_this_month, d.min_payment)
                 status = get_envelope_due_status_str(d, paid_this_month, current_day)
                 status_suffix = f" ({status})" if status else ""
-                min_pay_lines.append(f"• {d.name} (обязательный платеж): оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(d.min_payment)}</b>{status_suffix}")
+                due_str = f" (до {d.due_day}-го)" if d.due_day else ""
+                min_pay_lines.append(f"• {d.name}{due_str} (обязательный платеж): оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(d.min_payment)}</b>{status_suffix}")
             parts.append("\n💳 <b>Обязательные платежи по кредитам:</b>\n" + "\n".join(min_pay_lines))
 
     # === ВКЛАДКА 3: ДОЛГИ ===
@@ -908,7 +943,8 @@ def build_dashboard(
                 paid_this_month = monthly_payments.get(e.id, 0.0) if monthly_payments else 0.0
                 status = get_envelope_due_status_str(e, paid_this_month, current_day)
                 status_suffix = f" — <i>{status}</i>" if status else ""
-                credit_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b> (мин. платёж <b>{fmt_money(e.min_payment)}</b>{pct_str}){status_suffix}")
+                due_str = f" (до {e.due_day}-го)" if e.due_day else ""
+                credit_lines.append(f"• {e.name}{due_str}: осталось <b>{fmt_money(rem)}</b> (мин. платёж <b>{fmt_money(e.min_payment)}</b>{pct_str}){status_suffix}")
             parts.append("🏦 <b>Банковские кредиты и карты:</b>\n" + "\n".join(credit_lines))
             
         active_personal = [d for d in debt_envs if (d.min_payment or 0) <= 0 and (d.target_amount or 0) - d.current_amount > 0]
@@ -922,7 +958,8 @@ def build_dashboard(
                 paid_this_month = monthly_payments.get(e.id, 0.0) if monthly_payments else 0.0
                 status = get_envelope_due_status_str(e, paid_this_month, current_day)
                 status_suffix = f" — <i>{status}</i>" if status else ""
-                personal_lines.append(f"• {e.name}: осталось <b>{fmt_money(rem)}</b>{credit_lines_term}{status_suffix}")
+                due_str = f" (до {e.due_day}-го)" if e.due_day else ""
+                personal_lines.append(f"• {e.name}{due_str}: осталось <b>{fmt_money(rem)}</b>{credit_lines_term}{status_suffix}")
             parts.append("\n🤝 <b>Долги близким:</b>\n" + "\n".join(personal_lines))
             
         all_active_debts = [d for d in debt_envs if (d.target_amount or 0) - d.current_amount > 0]
@@ -1189,20 +1226,20 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
             ]
             is_first_setup = len(existing_real_envs) == 0
 
-            # Guard: Force LLM intent to transaction if budget already exists
-            if brain_response.intent == "profile_update" and not is_first_setup:
-                brain_response.intent = "transaction"
-                if brain_response.plan_items and not brain_response.income_allocations:
-                    brain_response.income_allocations = [
-                        IncomeAllocation(envelope_name=p.name, amount=p.amount)
-                        for p in brain_response.plan_items
-                    ]
-                brain_response.plan_items = None
-                brain_response.envelopes_to_create = None
+
 
             session.add(ChatMessage(user_id=user.telegram_id, role="user", content=text))
 
             extra_reply_parts = []
+            if getattr(brain_response, 'envelopes_to_mark_paid', None):
+                current_month_str = datetime.utcnow().strftime("%Y-%m")
+                for name in brain_response.envelopes_to_mark_paid:
+                    env = _find_envelope(envelopes, name)
+                    if env:
+                        env.last_paid_month = current_month_str
+                        extra_reply_parts.append(
+                            f"✅ Отметил статью <b>«{env.name}»</b> как оплаченную за этот месяц."
+                        )
             show_envelopes_button = False
 
             is_already_confirming = False
@@ -1399,21 +1436,45 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             })
 
             elif brain_response.intent == "profile_update" and brain_response.envelopes_to_create:
-                # Guard: if user already has a real budget (non-trivial envelopes), 
-                # a second profile_update is almost always the LLM making a mistake.
-                # We only allow profile_update to OVERWRITE data if there's no prior budget.
                 existing_real_envs = [
                     e for e in envelopes
                     if e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")
                 ]
                 is_first_setup = len(existing_real_envs) == 0
 
+                changes = []
                 if not is_first_setup:
-                    # LLM triggered profile_update by mistake. Only CREATE new envelopes,
-                    # never overwrite existing ones. This prevents budget corruption.
+                    # Update metadata of existing envelopes and create new ones.
+                    # Never overwrite current_amount of existing envelopes to protect balance history.
+                    affected_envs = []
                     for env_data in brain_response.envelopes_to_create:
                         existing = _find_envelope(envelopes, env_data.name)
-                        if not existing:
+                        if existing:
+                            old_target = existing.target_amount
+                            old_due = existing.due_day
+                            old_min = existing.min_payment
+                            
+                            target_changed = (old_target != env_data.target_amount)
+                            due_changed = (old_due != env_data.due_day)
+                            min_changed = (old_min != env_data.min_payment)
+                            
+                            existing.target_amount = env_data.target_amount
+                            existing.is_debt = env_data.is_debt
+                            existing.is_goal = env_data.is_goal
+                            existing.min_payment = env_data.min_payment
+                            existing.due_day = env_data.due_day
+                            affected_envs.append(existing)
+                            
+                            if target_changed or due_changed or min_changed:
+                                change_parts = []
+                                if target_changed:
+                                    change_parts.append(f"лимит {fmt_money(old_target or 0)} → {fmt_money(env_data.target_amount or 0)}")
+                                if due_changed:
+                                    change_parts.append(f"срок до {old_due or '—'}-го → до {env_data.due_day or '—'}-го")
+                                if min_changed:
+                                    change_parts.append(f"мин. платеж {fmt_money(old_min or 0)} → {fmt_money(env_data.min_payment or 0)}")
+                                changes.append(f"• <b>{existing.name}</b>: " + ", ".join(change_parts))
+                        else:
                             new_env = Envelope(
                                 user_id=budget_owner.telegram_id,
                                 name=env_data.name,
@@ -1421,11 +1482,16 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                                 current_amount=0.0,
                                 is_debt=env_data.is_debt,
                                 is_goal=env_data.is_goal,
-                                min_payment=env_data.min_payment
+                                min_payment=env_data.min_payment,
+                                due_day=env_data.due_day
                             )
                             session.add(new_env)
-                            envelopes.append(new_env)
+                            affected_envs.append(new_env)
+                            changes.append(f"• <b>{new_env.name}</b> [Новый]: лимит {fmt_money(new_env.target_amount or 0)}")
                     await session.flush()
+                    for ae in affected_envs:
+                        if ae not in envelopes:
+                            envelopes.append(ae)
                 else:
                     # First-time setup — allow full creation (forced current_amount = 0.0)
                     affected_envs = []
@@ -1437,6 +1503,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             existing.is_debt = env_data.is_debt
                             existing.is_goal = env_data.is_goal
                             existing.min_payment = env_data.min_payment
+                            existing.due_day = env_data.due_day
                             affected_envs.append(existing)
                         else:
                             new_env = Envelope(
@@ -1446,7 +1513,8 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                                 current_amount=0.0,
                                 is_debt=env_data.is_debt,
                                 is_goal=env_data.is_goal,
-                                min_payment=env_data.min_payment
+                                min_payment=env_data.min_payment,
+                                due_day=env_data.due_day
                             )
                             session.add(new_env)
                             affected_envs.append(new_env)
@@ -1508,7 +1576,13 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                     })
                             
                 env_count = len([e for e in envelopes if e.name.lower().strip() not in ("нераспределённые", "кошелек", "кошелёк")])
-                brain_response.coach_reply += f"\n\n📊 Бюджет сформирован ({env_count} категорий)"
+                if is_first_setup:
+                    brain_response.coach_reply += f"\n\n📊 Бюджет сформирован ({env_count} категорий)"
+                else:
+                    if changes:
+                        brain_response.coach_reply = "✅ <b>Обновил бюджет:</b>\n" + "\n".join(changes)
+                    else:
+                        brain_response.coach_reply += f"\n\n📊 Бюджет обновлен ({env_count} категорий)"
 
             # Post-validation: fix any math errors from LLM
             if brain_response.intent == "profile_update" and brain_response.envelopes_to_create:
@@ -1649,26 +1723,48 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                 await state.set_data(state_data)
 
         reply_markup = None
-        is_profile_update = brain_response.intent == "profile_update"
-        has_allocs = False
-        if is_profile_update:
-            has_allocs = bool(brain_response.plan_items and brain_response.free_cash and brain_response.free_cash > 0)
-        else:
-            has_allocs = bool(brain_response.income_allocations or brain_response.plan_items)
-            
-        if has_allocs:
-            reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="✅ Да, применить", callback_data="confirm_income")],
-                [InlineKeyboardButton(text="❌ Оставить в нераспределенных", callback_data="reject_income")]
-            ])
-        elif force_dashboard:
-            reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="👥 Семейный бюджет", callback_data="family_menu")]
-            ])
-        elif show_envelopes_button:
-            reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-                [InlineKeyboardButton(text="📊 Показать мой бюджет", callback_data="show_envelopes")]
-            ])
+        is_pending_paid = False
+        if getattr(brain_response, 'pending_paid_confirmation', None) and state:
+            env = _find_envelope(envelopes, brain_response.pending_paid_confirmation)
+            if env:
+                limit = env.min_payment if env.is_debt else env.target_amount
+                limit_val = limit or 0.0
+                
+                await state.set_state(IncomeStates.confirming_paid_limit)
+                await state.set_data({
+                    "envelope_name": env.name,
+                    "limit_amount": limit_val
+                })
+                
+                reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [
+                        InlineKeyboardButton(text="✅ Да", callback_data="confirm_paid_yes"),
+                        InlineKeyboardButton(text="✏️ Другая сумма", callback_data="confirm_paid_no")
+                    ]
+                ])
+                is_pending_paid = True
+
+        if not is_pending_paid:
+            is_profile_update = brain_response.intent == "profile_update"
+            has_allocs = False
+            if is_profile_update:
+                has_allocs = bool(brain_response.plan_items and brain_response.free_cash and brain_response.free_cash > 0)
+            else:
+                has_allocs = bool(brain_response.income_allocations or brain_response.plan_items)
+                
+            if has_allocs:
+                reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="✅ Да, применить", callback_data="confirm_income")],
+                    [InlineKeyboardButton(text="❌ Оставить в нераспределенных", callback_data="reject_income")]
+                ])
+            elif force_dashboard:
+                reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="👥 Семейный бюджет", callback_data="family_menu")]
+                ])
+            elif show_envelopes_button:
+                reply_markup = InlineKeyboardMarkup(inline_keyboard=[
+                    [InlineKeyboardButton(text="📊 Показать мой бюджет", callback_data="show_envelopes")]
+                ])
 
         # Send final answer first to prevent visual gap
         await message.answer(safe_reply, parse_mode="HTML", reply_markup=reply_markup)
@@ -1806,6 +1902,56 @@ async def reject_income(callback, state: FSMContext):
     await state.clear()
 
 
+@router.callback_query(F.data == "confirm_paid_yes", IncomeStates.confirming_paid_limit)
+async def confirm_paid_yes(callback: CallbackQuery, state: FSMContext):
+    state_data = await state.get_data()
+    env_name = state_data.get("envelope_name")
+    
+    current_month_str = datetime.utcnow().strftime("%Y-%m")
+    
+    async with async_session_maker() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        user = user_result.scalar_one_or_none()
+        
+        budget_owner = user
+        if user and user.family_host_id:
+            host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+            host = host_result.scalar_one_or_none()
+            if host:
+                budget_owner = host
+
+        env_result = await session.execute(
+            select(Envelope).where(
+                Envelope.user_id == budget_owner.telegram_id,
+                func.lower(Envelope.name) == env_name.lower().strip()
+            )
+        )
+        env = env_result.scalar_one_or_none()
+        if env:
+            env.last_paid_month = current_month_str
+            await session.commit()
+            
+            await callback.message.edit_text(
+                f"✅ Отметил статью <b>«{env.name}»</b> как оплаченную за этот месяц.",
+                parse_mode="HTML"
+            )
+        else:
+            await callback.message.edit_text("Не удалось найти статью расходов.")
+            
+    await state.clear()
+
+
+@router.callback_query(F.data == "confirm_paid_no", IncomeStates.confirming_paid_limit)
+async def confirm_paid_no(callback: CallbackQuery, state: FSMContext):
+    state_data = await state.get_data()
+    env_name = state_data.get("envelope_name")
+    await callback.message.edit_text(
+        f"Окей! Тогда напиши точную сумму оплаты, например: <i>«оплатил {env_name} 900»</i>",
+        parse_mode="HTML"
+    )
+    await state.clear()
+
+
 @router.callback_query(F.data.startswith("detail_grp:"))
 async def show_group_details(callback: CallbackQuery):
     grp_name = callback.data.split(":", 1)[1]
@@ -1853,7 +1999,8 @@ async def show_group_details(callback: CallbackQuery):
             spent = monthly_spending.get(e.id, 0.0)
             status = get_envelope_due_status_str(e, spent, current_day)
             status_suffix = f" — <i>{status}</i>" if status else ""
-            lines.append(f"• {e.name}: доступно <b>{fmt_money(e.current_amount)}</b>{limit_str}{status_suffix}")
+            due_str = f" (до {e.due_day}-го)" if e.due_day else ""
+            lines.append(f"• {e.name}{due_str}: доступно <b>{fmt_money(e.current_amount)}</b>{limit_str}{status_suffix}")
             
         text = (
             f"🔍 <b>Детализация категории: {grp_name}</b>\n\n"

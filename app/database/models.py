@@ -38,6 +38,7 @@ class Envelope(Base):
     min_payment: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     priority: Mapped[int] = mapped_column(default=1)
     due_day: Mapped[Optional[int]] = mapped_column(Integer, nullable=True, default=None)
+    last_paid_month: Mapped[Optional[str]] = mapped_column(String, nullable=True, default=None)
 
     user = relationship("User", back_populates="envelopes")
     transactions = relationship("Transaction", back_populates="envelope")
