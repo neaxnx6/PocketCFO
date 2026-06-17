@@ -1724,17 +1724,39 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
 
         reply_markup = None
         is_pending_paid = False
-        if getattr(brain_response, 'pending_paid_confirmation', None) and state:
-            env = _find_envelope(envelopes, brain_response.pending_paid_confirmation)
-            if env:
-                limit = env.min_payment if env.is_debt else env.target_amount
-                limit_val = limit or 0.0
-                
+        
+        # Consolidate confirmation sources
+        confirm_names = []
+        if getattr(brain_response, 'pending_paid_confirmations', None):
+            confirm_names.extend(brain_response.pending_paid_confirmations)
+        elif getattr(brain_response, 'pending_paid_confirmation', None):
+            confirm_names.append(brain_response.pending_paid_confirmation)
+            
+        if confirm_names and state:
+            valid_envs = []
+            for name in confirm_names:
+                env = _find_envelope(envelopes, name)
+                if env:
+                    valid_envs.append(env)
+            
+            if valid_envs:
                 await state.set_state(IncomeStates.confirming_paid_limit)
                 await state.set_data({
-                    "envelope_name": env.name,
-                    "limit_amount": limit_val
+                    "envelope_names": [env.name for env in valid_envs]
                 })
+                
+                if len(valid_envs) == 1:
+                    env = valid_envs[0]
+                    limit = env.min_payment if env.is_debt else env.target_amount
+                    limit_val = limit or 0.0
+                    safe_reply = f"Отметить статью <b>«{env.name}»</b> полностью оплаченной в этом месяце ({fmt_money(limit_val)})?"
+                else:
+                    lines = []
+                    for env in valid_envs:
+                        limit = env.min_payment if env.is_debt else env.target_amount
+                        limit_val = limit or 0.0
+                        lines.append(f"• <b>{env.name}</b> ({fmt_money(limit_val)})")
+                    safe_reply = "Отметить эти статьи полностью оплаченными в этом месяце?\n" + "\n".join(lines)
                 
                 reply_markup = InlineKeyboardMarkup(inline_keyboard=[
                     [
@@ -1905,8 +1927,10 @@ async def reject_income(callback, state: FSMContext):
 @router.callback_query(F.data == "confirm_paid_yes", IncomeStates.confirming_paid_limit)
 async def confirm_paid_yes(callback: CallbackQuery, state: FSMContext):
     state_data = await state.get_data()
-    env_name = state_data.get("envelope_name")
-    
+    env_names = state_data.get("envelope_names")
+    if not env_names and state_data.get("envelope_name"):
+        env_names = [state_data["envelope_name"]]
+        
     current_month_str = datetime.utcnow().strftime("%Y-%m")
     
     async with async_session_maker() as session:
@@ -1920,23 +1944,35 @@ async def confirm_paid_yes(callback: CallbackQuery, state: FSMContext):
             if host:
                 budget_owner = host
 
-        env_result = await session.execute(
-            select(Envelope).where(
-                Envelope.user_id == budget_owner.telegram_id,
-                func.lower(Envelope.name) == env_name.lower().strip()
-            )
-        )
-        env = env_result.scalar_one_or_none()
-        if env:
-            env.last_paid_month = current_month_str
+        marked_names = []
+        if env_names:
+            for name in env_names:
+                env_result = await session.execute(
+                    select(Envelope).where(
+                        Envelope.user_id == budget_owner.telegram_id,
+                        func.lower(Envelope.name) == name.lower().strip()
+                    )
+                )
+                env = env_result.scalar_one_or_none()
+                if env:
+                    env.last_paid_month = current_month_str
+                    marked_names.append(env.name)
+                    
+        if marked_names:
             await session.commit()
-            
-            await callback.message.edit_text(
-                f"✅ Отметил статью <b>«{env.name}»</b> как оплаченную за этот месяц.",
-                parse_mode="HTML"
-            )
+            if len(marked_names) == 1:
+                await callback.message.edit_text(
+                    f"✅ Отметил статью <b>«{marked_names[0]}»</b> как оплаченную за этот месяц.",
+                    parse_mode="HTML"
+                )
+            else:
+                formatted_list = "\n".join(f"• <b>«{name}»</b>" for name in marked_names)
+                await callback.message.edit_text(
+                    f"✅ Отметил статьи как оплаченные за этот месяц:\n{formatted_list}",
+                    parse_mode="HTML"
+                )
         else:
-            await callback.message.edit_text("Не удалось найти статью расходов.")
+            await callback.message.edit_text("Не удалось найти статьи расходов.")
             
     await state.clear()
 
@@ -1944,11 +1980,20 @@ async def confirm_paid_yes(callback: CallbackQuery, state: FSMContext):
 @router.callback_query(F.data == "confirm_paid_no", IncomeStates.confirming_paid_limit)
 async def confirm_paid_no(callback: CallbackQuery, state: FSMContext):
     state_data = await state.get_data()
-    env_name = state_data.get("envelope_name")
-    await callback.message.edit_text(
-        f"Окей! Тогда напиши точную сумму оплаты, например: <i>«оплатил {env_name} 900»</i>",
-        parse_mode="HTML"
-    )
+    env_names = state_data.get("envelope_names")
+    if not env_names and state_data.get("envelope_name"):
+        env_names = [state_data["envelope_name"]]
+        
+    if env_names and len(env_names) == 1:
+        await callback.message.edit_text(
+            f"Окей! Тогда напиши точную сумму оплаты, например: <i>«оплатил {env_names[0]} 900»</i>",
+            parse_mode="HTML"
+        )
+    else:
+        await callback.message.edit_text(
+            "Окей! Тогда напиши точные суммы текстом, например: <i>«аренда 30000, интернет 900»</i>",
+            parse_mode="HTML"
+        )
     await state.clear()
 
 

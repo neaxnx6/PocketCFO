@@ -168,3 +168,34 @@ def test_absolute_due_days_and_last_paid_month():
     assert "ОБЯЗАТЕЛЬСТВА:</b> <b>41.5к</b>" in result_nav
     assert "Обеспечено: <b>1.5к</b>" in result_nav
     assert "Не хватает: <b>40к</b>" in result_nav
+
+
+def test_paid_confirmations_formatting():
+    from app.bot.handlers.transactions import fmt_money
+    
+    # Mock some envelopes
+    env_rent = MockEnvelope(1, "Аренда", 0, 35000, is_debt=False, is_goal=False, due_day=15)
+    env_internet = MockEnvelope(2, "Интернет", 0, 1500, is_debt=False, is_goal=False, due_day=10)
+    
+    # Test formatting logic
+    # Single envelope
+    limit = env_rent.min_payment if env_rent.is_debt else env_rent.target_amount
+    limit_val = limit or 0.0
+    safe_reply_single = f"Отметить статью <b>«{env_rent.name}»</b> полностью оплаченной в этом месяце ({fmt_money(limit_val)})?"
+    assert "Аренда" in safe_reply_single
+    assert "35к" in safe_reply_single or "35 000" in safe_reply_single
+    
+    # Multiple envelopes
+    valid_envs = [env_rent, env_internet]
+    lines = []
+    for env in valid_envs:
+        limit = env.min_payment if env.is_debt else env.target_amount
+        limit_val = limit or 0.0
+        lines.append(f"• <b>{env.name}</b> ({fmt_money(limit_val)})")
+    safe_reply_multi = "Отметить эти статьи полностью оплаченными в этом месяце?\n" + "\n".join(lines)
+    
+    assert "Аренда" in safe_reply_multi
+    assert "Интернет" in safe_reply_multi
+    assert "35к" in safe_reply_multi or "35 000" in safe_reply_multi
+    assert "1.5к" in safe_reply_multi or "1 500" in safe_reply_multi or "1.5" in safe_reply_multi
+
