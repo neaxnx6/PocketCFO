@@ -1437,27 +1437,41 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                         if is_already_confirming:
                             continue
 
-                        unallocated = _find_unallocated(envelopes)
-                        if not unallocated:
-                            unallocated = Envelope(
-                                user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0
-                            )
-                            session.add(unallocated)
-                            await session.flush()
-                            envelopes.append(unallocated)
-
                         actual_amount = abs(tx_data.amount)
-                        unallocated.current_amount += actual_amount
-                        tx = Transaction(
-                            user_id=user.telegram_id,
-                            amount=actual_amount,
-                            envelope_id=unallocated.id,
-                            description=tx_data.category or "Доход"
-                        )
-                        session.add(tx)
-                        
-                        total_income_this_turn += actual_amount
-                        unallocated_env_id = unallocated.id
+                        target_env = None
+                        if tx_data.target_envelope_name:
+                            target_env = _find_envelope(envelopes, tx_data.target_envelope_name)
+
+                        if target_env:
+                            target_env.current_amount += actual_amount
+                            tx = Transaction(
+                                user_id=user.telegram_id,
+                                amount=actual_amount,
+                                envelope_id=target_env.id,
+                                description=tx_data.category or f"Внешнее пополнение: {target_env.name}"
+                            )
+                            session.add(tx)
+                        else:
+                            unallocated = _find_unallocated(envelopes)
+                            if not unallocated:
+                                unallocated = Envelope(
+                                    user_id=budget_owner.telegram_id, name="Нераспределённые", current_amount=0
+                                )
+                                session.add(unallocated)
+                                await session.flush()
+                                envelopes.append(unallocated)
+
+                            unallocated.current_amount += actual_amount
+                            tx = Transaction(
+                                user_id=user.telegram_id,
+                                amount=actual_amount,
+                                envelope_id=unallocated.id,
+                                description=tx_data.category or "Доход"
+                            )
+                            session.add(tx)
+                            
+                            total_income_this_turn += actual_amount
+                            unallocated_env_id = unallocated.id
 
                 # After processing all transactions, set up the confirming state if there was any income
                 if total_income_this_turn > 0:

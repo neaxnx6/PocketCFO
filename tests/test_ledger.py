@@ -322,3 +322,62 @@ async def test_ledger_guard_violation_rollback(test_session_maker, mock_message,
         txs = list(txs_res.scalars().all())
         assert len(txs) == 1  # No new transaction saved
         assert txs[0].amount == 10000.0
+
+
+@pytest.mark.asyncio
+async def test_direct_envelope_income(test_session_maker, mock_message, mock_state, monkeypatch):
+    monkeypatch.setattr("app.bot.handlers.transactions.async_session_maker", lambda: test_session_maker())
+
+    # 1. Setup user, envelopes, transactions
+    async with test_session_maker() as session:
+        user = User(telegram_id=12345, invite_code="CF-12345")
+        unallocated = Envelope(user_id=12345, name="Нераспределённые", current_amount=10000.0)
+        food = Envelope(user_id=12345, name="Продукты", current_amount=0.0, target_amount=15000.0)
+        session.add_all([user, unallocated, food])
+        await session.flush()
+        
+        tx1 = Transaction(user_id=12345, amount=10000.0, envelope_id=unallocated.id, description="Старт")
+        session.add_all([tx1])
+        await session.commit()
+
+    # 2. Mock AI response for direct envelope income and expense (past spend simulation)
+    brain_resp = BrainResponse(
+        thoughts="User already spent 5000 of products budget before tracking.",
+        intent="transaction",
+        transactions=[
+            TransactionItem(action="income", amount=5000.0, target_envelope_name="Продукты", category="Прошлое пополнение"),
+            TransactionItem(action="expense", amount=5000.0, target_envelope_name="Продукты", category="Прошлый расход")
+        ],
+        show_dashboard=True,
+        coach_reply="Зафиксировал прошлые траты 5000 на продукты."
+    )
+
+    async def mock_process(*args, **kwargs):
+        return brain_resp
+
+    monkeypatch.setattr("app.bot.handlers.transactions.process_user_message", mock_process)
+
+    # 3. Process transaction
+    await handle_transaction(mock_message, "половину продуктов уже закрыть", state=mock_state)
+
+    # 4. Check balances
+    async with test_session_maker() as session:
+        envs_res = await session.execute(select(Envelope).where(Envelope.user_id == 12345))
+        envs = list(envs_res.scalars().all())
+        unallocated_db = next(e for e in envs if e.name == "Нераспределённые")
+        food_db = next(e for e in envs if e.name == "Продукты")
+
+        # Balance check:
+        # Food: started 0 + 5000 income - 5000 expense = 0.0
+        assert food_db.current_amount == 0.0
+        # Unallocated: remained untouched at 10000.0 (no overdraft triggered)
+        assert unallocated_db.current_amount == 10000.0
+        
+        # Verify transaction logs
+        txs_res = await session.execute(select(Transaction).where(Transaction.user_id == 12345).order_by(Transaction.id))
+        txs = list(txs_res.scalars().all())
+        assert len(txs) == 3 # Start (10000), Income (5000), Expense (-5000)
+        assert txs[1].envelope_id == food_db.id
+        assert txs[1].amount == 5000.0
+        assert txs[2].envelope_id == food_db.id
+        assert txs[2].amount == -5000.0
