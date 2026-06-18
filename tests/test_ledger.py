@@ -9,7 +9,7 @@ from app.bot.handlers.transactions import (
     confirm_income,
     IncomeStates
 )
-from app.services.ai_brain import BrainResponse, PydanticEnvelope, PlanItem, TransactionItem
+from app.services.ai_brain import BrainResponse, PydanticEnvelope, PlanItem, TransactionItem, IncomeAllocation
 from unittest.mock import AsyncMock, MagicMock
 
 # In-memory SQLite for testing
@@ -498,3 +498,70 @@ def test_sync_adjustment_item_validation():
     # Invalid case: neither set
     with pytest.raises(ValueError, match="Укажи либо amount, либо used_fraction."):
         SyncAdjustmentItem(envelope_name="Продукты")
+
+
+@pytest.mark.asyncio
+async def test_negotiate_income_no_double_counting(test_session_maker, mock_message, mock_state, monkeypatch):
+    monkeypatch.setattr("app.bot.handlers.transactions.async_session_maker", lambda: test_session_maker())
+
+    # 1. Setup user, unallocated envelope
+    async with test_session_maker() as session:
+        user = User(telegram_id=12345, invite_code="CF-12345")
+        unallocated = Envelope(user_id=12345, name="Нераспределённые", current_amount=32000.0)
+        session.add_all([user, unallocated])
+        await session.flush()
+        
+        tx = Transaction(user_id=12345, amount=32000.0, envelope_id=unallocated.id, description="Доход (авто-возобновление)")
+        session.add(tx)
+        await session.commit()
+        
+        unallocated_id = unallocated.id
+
+    # 2. Setup FSM state to confirming
+    await mock_state.set_state(IncomeStates.confirming)
+    await mock_state.set_data({
+        "income_amount": 32000.0,
+        "unallocated_env_id": unallocated_id,
+        "alloc_names": ["Аренда"],
+        "alloc_amounts": [32000.0]
+    })
+
+    # 3. Mock AI response when user is negotiating
+    brain_resp = BrainResponse(
+        thoughts="User negotiates income allocations because rent is already paid.",
+        intent="transaction",
+        transactions=[
+            TransactionItem(action="income", amount=32000.0)
+        ],
+        income_allocations=[
+            IncomeAllocation(envelope_name="Продукты", amount=15000.0),
+            IncomeAllocation(envelope_name="Халва", amount=17000.0)
+        ],
+        show_dashboard=True,
+        coach_reply="Хорошо, раз аренда оплачена, направим на Продукты 15к и Халву 17к."
+    )
+
+    async def mock_process(*args, **kwargs):
+        return brain_resp
+
+    monkeypatch.setattr("app.bot.handlers.transactions.process_user_message", mock_process)
+
+    # 4. Run handle_transaction
+    await handle_transaction(mock_message, "на этот месяц аренда квартиры уже оплачена", state=mock_state)
+
+    # 5. Verify unallocated envelope current_amount is still 32000 (NOT 64000 or 96000)
+    async with test_session_maker() as session:
+        unallocated_db = await session.get(Envelope, unallocated_id)
+        assert unallocated_db.current_amount == 32000.0
+
+        # Verify that state is still confirming
+        assert await mock_state.get_state() == IncomeStates.confirming.state
+        
+        # Verify state data contains updated allocations
+        state_data = await mock_state.get_data()
+        assert state_data["income_amount"] == 32000.0
+        assert state_data["alloc_names"] == ["Продукты", "Халва"]
+        assert state_data["alloc_amounts"] == [15000.0, 17000.0]
+
+        # Verify ledger
+        assert await verify_user_ledger(session, 12345) is True

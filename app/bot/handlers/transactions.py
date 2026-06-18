@@ -1356,14 +1356,32 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
             show_envelopes_button = False
 
             is_already_confirming = False
+            pending_income = 0.0
             if state:
                 current_state_check = await state.get_state()
                 is_already_confirming = (current_state_check == IncomeStates.confirming.state)
+                if is_already_confirming:
+                    pending_data = await state.get_data()
+                    pending_income = pending_data.get("income_amount", 0.0)
+
+            # Determine if we should clear the confirmation state.
+            # We only clear it if there is a new transaction that is not the currently pending income.
+            has_interrupting_transaction = False
+            if brain_response.intent == "transaction" and brain_response.transactions:
+                for tx_data in brain_response.transactions:
+                    if tx_data.action == "expense":
+                        has_interrupting_transaction = True
+                        break
+                    elif tx_data.action == "income":
+                        if not is_already_confirming or abs(tx_data.amount - pending_income) > 0.01:
+                            has_interrupting_transaction = True
+                            break
 
             if brain_response.intent == "transaction" and brain_response.transactions:
-                if state and is_already_confirming:
-                    await state.clear()
-                    is_already_confirming = False
+                if has_interrupting_transaction:
+                    if state and is_already_confirming:
+                        await state.clear()
+                        is_already_confirming = False
 
                 total_income_this_turn = 0.0
                 unallocated_env_id = None
