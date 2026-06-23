@@ -892,9 +892,9 @@ def build_dashboard(
         parts.append("")
         
         parts.append(
-            f"💳 <b>До конца месяца нужно закрыть:</b> <b>{fmt_money(total_target)}</b>\n"
+            f"💳 <b>Целевой план на месяц:</b> <b>{fmt_money(total_target)}</b>\n"
             f"✅ <b>Уже закрыто:</b> <b>{fmt_money(total_funded)}</b>\n"
-            f"📌 <b>Осталось:</b> <b>{fmt_money(deficit)}</b>"
+            f"📌 <b>Осталось закрыть:</b> <b>{fmt_money(deficit)}</b>"
         )
         parts.append("")
         
@@ -1235,7 +1235,7 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             f"Общая сумма дохода = {pending_income:.0f} руб. "
                             f"Твои income_allocations ДОЛЖНЫ СУММИРОВАТЬСЯ РОВНО {pending_income:.0f} руб. "
                             f"Не больше, не меньше. Укажи intent=transaction и income_allocations. "
-                            f"ВАЖНО: Если пользователь упомянул, что какие-то расходы/конверты уже оплачены напрямую (аренда, интернет и т.д.), "
+                            f"ВАЖНО: Если пользователь упомянул, что какие-то расходы/долги уже оплачены напрямую, либо платеж по ним в этом месяце уже не нужен (например: 'платеж будет в следующем месяце'), "
                             f"обязательно укажи их имена в массиве `envelopes_to_mark_paid` параллельно с распределением.]"
                         )
             

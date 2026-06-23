@@ -38,9 +38,9 @@ def test_build_dashboard_navigator():
     assert "ВКЛАДКА: НАВИГАТОР" in result
     assert "Деньги:</b> <b>30к</b>" in result
     assert "Свободно: <b>10к</b> (хватит, чтобы покрыть еще <b>10к</b> обязательств 💡)" in result
-    assert "До конца месяца нужно закрыть:</b> <b>40к</b>" in result
+    assert "Целевой план на месяц:</b> <b>40к</b>" in result
     assert "Уже закрыто:</b> <b>25к</b>" in result
-    assert "Осталось:</b> <b>15к</b>" in result
+    assert "Осталось закрыть:</b> <b>15к</b>" in result
 
     # Test when unallocated is enough to cover deficit
     envelopes_enough = [
@@ -50,7 +50,7 @@ def test_build_dashboard_navigator():
     ]
     result_enough = build_dashboard(envelopes_enough, monthly_income=70000, tab='navigator', monthly_payments={}, monthly_spending={})
     assert "Свободно: <b>20к</b> (этого достаточно для полного покрытия месяца, осталось распределить! ✨)" in result_enough
-    assert "Осталось:</b> <b>15к</b>" in result_enough
+    assert "Осталось закрыть:</b> <b>15к</b>" in result_enough
 
 def test_build_dashboard_expenses():
     envelopes = [
@@ -164,9 +164,9 @@ def test_absolute_due_days_and_last_paid_month():
     
     # 4. Verify navigator math for marked paid envelope:
     result_nav = build_dashboard(envelopes, monthly_income=50000, tab='navigator', monthly_payments={}, monthly_spending={}, monthly_adjustments={3: 1500.0})
-    assert "До конца месяца нужно закрыть:</b> <b>41.5к</b>" in result_nav
+    assert "Целевой план на месяц:</b> <b>41.5к</b>" in result_nav
     assert "Уже закрыто:</b> <b>1.5к</b>" in result_nav
-    assert "Осталось:</b> <b>40к</b>" in result_nav
+    assert "Осталось закрыть:</b> <b>40к</b>" in result_nav
 
 
 def test_paid_confirmations_formatting():
