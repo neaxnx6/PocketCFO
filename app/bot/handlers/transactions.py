@@ -848,55 +848,33 @@ def build_dashboard(
     
     # === ВКЛАДКА 1: НАВИГАТОР ===
     if tab == 'navigator':
-        expenses_obligations = 0.0
-        funded_expenses = 0.0
+        total_target = 0.0
+        total_funded = 0.0
+
         for e in expense_envs:
+            target = e.target_amount or 0.0
             spent = monthly_spending.get(e.id, 0.0)
             adj = monthly_adjustments.get(e.id, 0.0)
-            rem_limit = max(0.0, (e.target_amount or 0.0) - (spent + adj))
-            expenses_obligations += rem_limit
+            funded = min(target, spent + adj + max(0.0, e.current_amount))
+            total_target += target
+            total_funded += funded
             
-            is_marked_paid = (getattr(e, 'last_paid_month', None) == current_month_str)
-            if is_marked_paid:
-                funded_expenses += rem_limit
-            else:
-                funded_expenses += min(rem_limit, e.current_amount)
-        
-        debts_obligations = 0.0
-        funded_debts = 0.0
         for d in debt_envs:
-            rem_debt = (d.target_amount or 0.0) - d.current_amount
+            min_pay = d.min_payment or 0.0
             paid = monthly_payments.get(d.id, 0.0)
-            if rem_debt > 0 or paid > 0:
-                min_pay = d.min_payment or 0.0
-                effective_obligation = min(min_pay, max(0.0, rem_debt + paid))
-                debts_obligations += effective_obligation
+            funded = min(min_pay, paid + max(0.0, d.current_amount))
+            total_target += min_pay
+            total_funded += funded
                 
-                is_marked_paid = (getattr(d, 'last_paid_month', None) == current_month_str)
-                if is_marked_paid:
-                    funded_debts += effective_obligation
-                else:
-                    funded_debts += min(effective_obligation, paid)
-                
-        total_obligations = expenses_obligations + debts_obligations
-        
-        total_funded_in_envelopes = funded_expenses + funded_debts
-        total_funded = total_funded_in_envelopes + unallocated_amount
-        if total_obligations > 0:
-            total_funded = min(total_funded, total_obligations)
-            
-        deficit = max(0.0, total_obligations - total_funded)
-        
-        coverage_pct = int((total_funded / total_obligations * 100)) if total_obligations > 0 else 100
+        deficit = max(0.0, total_target - total_funded)
         
         parts.append("📍 <b>ВКЛАДКА: НАВИГАТОР</b>\n")
-        parts.append(f"📊 <b>Обеспеченность месяца:</b> <b>{coverage_pct}%</b>")
         parts.append(get_health_status(envelopes, monthly_payments, monthly_spending, monthly_adjustments))
         parts.append("")  # Empty line
         
-        total_in_envelopes = sum(e.current_amount for e in expense_envs) + sum(e.current_amount for e in goal_envs)
-        buffer_amount = buffer_env.current_amount if buffer_env else 0.0
-        total_money = total_in_envelopes + unallocated_amount + buffer_amount
+        total_in_envelopes = sum(max(0.0, e.current_amount) for e in expense_envs) + sum(max(0.0, e.current_amount) for e in goal_envs)
+        buffer_amount = max(0.0, buffer_env.current_amount) if buffer_env else 0.0
+        total_money = total_in_envelopes + max(0.0, unallocated_amount) + buffer_amount
         
         free_cash_line = f"• Свободно: <b>{fmt_money(unallocated_amount)}</b>"
         if unallocated_amount > 0 and deficit > 0:
@@ -914,11 +892,9 @@ def build_dashboard(
         parts.append("")
         
         parts.append(
-            f"💳 <b>ОБЯЗАТЕЛЬСТВА:</b> <b>{fmt_money(total_obligations)}</b>\n"
-            f"• Расходы: <b>{fmt_money(expenses_obligations)}</b>\n"
-            f"• Мин. платежи: <b>{fmt_money(debts_obligations)}</b>\n"
-            f"• Обеспечено: <b>{fmt_money(total_funded)}</b>\n"
-            f"• Не хватает: <b>{fmt_money(deficit)}</b>"
+            f"💳 <b>До конца месяца нужно закрыть:</b> <b>{fmt_money(total_target)}</b>\n"
+            f"✅ <b>Уже закрыто:</b> <b>{fmt_money(total_funded)}</b>\n"
+            f"📌 <b>Осталось:</b> <b>{fmt_money(deficit)}</b>"
         )
         parts.append("")
         
@@ -1258,7 +1234,9 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             f"\n\n[SYSTEM: Пользователь обсуждает распределение дохода. "
                             f"Общая сумма дохода = {pending_income:.0f} руб. "
                             f"Твои income_allocations ДОЛЖНЫ СУММИРОВАТЬСЯ РОВНО {pending_income:.0f} руб. "
-                            f"Не больше, не меньше. Укажи intent=transaction и income_allocations.]"
+                            f"Не больше, не меньше. Укажи intent=transaction и income_allocations. "
+                            f"ВАЖНО: Если пользователь упомянул, что какие-то расходы/конверты уже оплачены напрямую (аренда, интернет и т.д.), "
+                            f"обязательно укажи их имена в массиве `envelopes_to_mark_paid` параллельно с распределением.]"
                         )
             
             if not negotiation_context:
@@ -1297,16 +1275,52 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
 
             session.add(ChatMessage(user_id=user.telegram_id, role="user", content=text))
 
+            is_already_confirming = False
+            pending_income = 0.0
+            if state:
+                current_state_check = await state.get_state()
+                is_already_confirming = (current_state_check == IncomeStates.confirming.state)
+                if is_already_confirming:
+                    pending_data = await state.get_data()
+                    pending_income = pending_data.get("income_amount", 0.0)
+
             extra_reply_parts = []
+            pending_paid_marks = []
+            
             if getattr(brain_response, 'envelopes_to_mark_paid', None):
                 current_month_str = datetime.utcnow().strftime("%Y-%m")
                 for name in brain_response.envelopes_to_mark_paid:
                     env = _find_envelope(envelopes, name)
                     if env:
-                        env.last_paid_month = current_month_str
-                        extra_reply_parts.append(
-                            f"✅ Отметил статью <b>«{env.name}»</b> как оплаченную за этот месяц."
-                        )
+                        if is_already_confirming:
+                            pending_paid_marks.append(env.id)
+                            extra_reply_parts.append(
+                                f"✅ Отмечу статью <b>«{env.name}»</b> как оплаченную после подтверждения распределения."
+                            )
+                        else:
+                            amount = env.target_amount or 0.0
+                            if amount > 0:
+                                existing_stmt = await session.execute(
+                                    select(BudgetSyncAdjustment)
+                                    .where(BudgetSyncAdjustment.envelope_id == env.id)
+                                    .where(BudgetSyncAdjustment.month == current_month_str)
+                                )
+                                existing_adj = existing_stmt.scalar_one_or_none()
+                                if existing_adj:
+                                    existing_adj.amount = amount
+                                    existing_adj.source = "ai_direct_mark"
+                                else:
+                                    new_adj = BudgetSyncAdjustment(
+                                        envelope_id=env.id,
+                                        amount=amount,
+                                        month=current_month_str,
+                                        source="ai_direct_mark",
+                                        reason="Отмечено оплаченным через AI"
+                                    )
+                                    session.add(new_adj)
+                            extra_reply_parts.append(
+                                f"✅ Отметил статью <b>«{env.name}»</b> как оплаченную за этот месяц."
+                            )
 
             if getattr(brain_response, 'sync_adjustments', None):
                 current_month_str = datetime.utcnow().strftime("%Y-%m")
@@ -1354,15 +1368,6 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                             )
 
             show_envelopes_button = False
-
-            is_already_confirming = False
-            pending_income = 0.0
-            if state:
-                current_state_check = await state.get_state()
-                is_already_confirming = (current_state_check == IncomeStates.confirming.state)
-                if is_already_confirming:
-                    pending_data = await state.get_data()
-                    pending_income = pending_data.get("income_amount", 0.0)
 
             # Determine if we should clear the confirmation state.
             # We only clear it if there is a new transaction that is not the currently pending income.
@@ -1577,7 +1582,8 @@ async def handle_transaction(message: Message, text: str, state: FSMContext = No
                                 "income_amount": total_income_this_turn,
                                 "unallocated_env_id": unallocated_env_id,
                                 "alloc_names": alloc_names,
-                                "alloc_amounts": alloc_amounts
+                                "alloc_amounts": alloc_amounts,
+                                "pending_paid_marks": pending_data.get("pending_paid_marks", []) + pending_paid_marks
                             })
 
             elif brain_response.intent == "profile_update" and brain_response.envelopes_to_create:
@@ -1962,6 +1968,7 @@ async def confirm_income(callback, state: FSMContext):
     unallocated_env_id = data.get("unallocated_env_id")
     alloc_names = data.get("alloc_names", [])
     alloc_amounts = data.get("alloc_amounts", [])
+    pending_paid_marks = data.get("pending_paid_marks", [])
 
     try:
         async with async_session_maker() as session:
@@ -2042,6 +2049,34 @@ async def confirm_income(callback, state: FSMContext):
                 session.add(tx_from)
                 session.add(tx_to)
                 distribution_text_parts.append(f"• {fmt_money(transfer_amount)} → {name}")
+
+            if pending_paid_marks:
+                current_month_str = datetime.utcnow().strftime("%Y-%m")
+                for env_id in pending_paid_marks:
+                    result_env = await session.execute(select(Envelope).where(Envelope.id == env_id))
+                    env = result_env.scalar_one_or_none()
+                    if env:
+                        amount = env.target_amount or 0.0
+                        if amount > 0:
+                            existing_stmt = await session.execute(
+                                select(BudgetSyncAdjustment)
+                                .where(BudgetSyncAdjustment.envelope_id == env.id)
+                                .where(BudgetSyncAdjustment.month == current_month_str)
+                            )
+                            existing_adj = existing_stmt.scalar_one_or_none()
+                            if existing_adj:
+                                existing_adj.amount = amount
+                                existing_adj.source = "ai_direct_mark"
+                            else:
+                                new_adj = BudgetSyncAdjustment(
+                                    envelope_id=env.id,
+                                    amount=amount,
+                                    month=current_month_str,
+                                    source="ai_direct_mark",
+                                    reason="Отмечено оплаченным через AI (confirm)"
+                                )
+                                session.add(new_adj)
+                        distribution_text_parts.append(f"✅ Статья <b>«{env.name}»</b> отмечена как оплаченная.")
 
             if not await verify_user_ledger(session, budget_owner.telegram_id):
                 await session.rollback()
@@ -2187,38 +2222,94 @@ async def show_group_details(callback: CallbackQuery):
         current_month_str = datetime.utcnow().strftime("%Y-%m")
         
         lines = []
+        buttons = []
         for e in grp_envs:
             spent = monthly_spending.get(e.id, 0.0)
             adj_val = monthly_adjustments.get(e.id, 0.0)
             remaining_limit = max(0.0, (e.target_amount or 0.0) - (spent + adj_val))
             
-            limit_str = f" из <b>{fmt_money(e.target_amount or 0)}</b>" if e.target_amount else ""
-            status = get_envelope_due_status_str(e, spent, current_day)
-            
-            is_marked_paid = (getattr(e, 'last_paid_month', None) == current_month_str)
-            if is_marked_paid:
-                status_suffix = " <b>[Оплачено ✅]</b>"
-            elif e.target_amount and e.current_amount >= remaining_limit:
-                status_suffix = " <b>[Оплачено ✅]</b>"
-            else:
-                status_suffix = f" — <i>{status}</i>" if status else ""
-                
+            limit_str = f" (лимит {fmt_money(e.target_amount or 0)})" if e.target_amount else ""
             due_str = f" (до {e.due_day}-го)" if e.due_day else ""
-            lines.append(
-                f"• {e.name}{due_str}: осталось учесть <b>{fmt_money(remaining_limit)}</b>{limit_str} "
-                f"(на балансе: <b>{fmt_money(e.current_amount)}</b> | 🔄 до старта: <b>{fmt_money(adj_val)}</b>){status_suffix}"
-            )
+            
+            if remaining_limit == 0:
+                lines.append(f"• {e.name}{due_str}: Оплачено в этом месяце ✅{limit_str}")
+            else:
+                lines.append(f"• {e.name}{due_str}: Нужно закрыть <b>{fmt_money(remaining_limit)}</b> (на балансе: <b>{fmt_money(e.current_amount)}</b>)")
+                # Add button to mark as paid outside
+                buttons.append([InlineKeyboardButton(
+                    text=f"✅ {e.name} уже оплачено вне бота", 
+                    callback_data=f"mark_paid:{grp_name}:{e.id}"
+                )])
             
         text = (
             f"🔍 <b>Детализация категории: {grp_name}</b>\n\n"
             + "\n".join(lines)
         )
         
-        reply_markup = InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="⬅️ Назад к категориям", callback_data="back_to_expenses")]
-        ])
+        buttons.append([InlineKeyboardButton(text="⬅️ Назад к категориям", callback_data="back_to_expenses")])
+        reply_markup = InlineKeyboardMarkup(inline_keyboard=buttons)
         
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
+
+
+@router.callback_query(F.data.startswith("mark_paid:"))
+async def mark_paid_callback(callback: CallbackQuery):
+    _, grp_name, env_id_str = callback.data.split(":", 2)
+    env_id = int(env_id_str)
+    
+    async with async_session_maker() as session:
+        user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
+        user = user_result.scalar_one_or_none()
+        if not user:
+            await callback.answer()
+            return
+            
+        budget_owner = user
+        if user.family_host_id:
+            host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
+            host = host_result.scalar_one_or_none()
+            if host:
+                budget_owner = host
+                
+        env_result = await session.execute(
+            select(Envelope)
+            .where(Envelope.id == env_id)
+            .where(Envelope.user_id == budget_owner.telegram_id)
+        )
+        env = env_result.scalar_one_or_none()
+        
+        if env:
+            current_month_str = datetime.utcnow().strftime("%Y-%m")
+            amount = env.target_amount or 0.0
+            if amount > 0:
+                existing_stmt = await session.execute(
+                    select(BudgetSyncAdjustment)
+                    .where(BudgetSyncAdjustment.envelope_id == env.id)
+                    .where(BudgetSyncAdjustment.month == current_month_str)
+                )
+                existing_adj = existing_stmt.scalar_one_or_none()
+                if existing_adj:
+                    existing_adj.amount = amount
+                    existing_adj.source = "user_direct_mark"
+                else:
+                    new_adj = BudgetSyncAdjustment(
+                        envelope_id=env.id,
+                        amount=amount,
+                        month=current_month_str,
+                        source="user_direct_mark",
+                        reason="Отмечено пользователем вручную (вне бота)"
+                    )
+                    session.add(new_adj)
+                await session.commit()
+                await callback.answer("✅ Отмечено как оплачено вне бота!")
+            else:
+                await callback.answer("У статьи нет целевой суммы", show_alert=True)
+        else:
+            await callback.answer("Конверт не найден", show_alert=True)
+            
+    # Refresh the view
+    callback.data = f"detail_grp:{grp_name}"
+    await show_group_details(callback)
 
 
 @router.callback_query(F.data == "back_to_expenses")

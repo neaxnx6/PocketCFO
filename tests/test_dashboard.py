@@ -37,11 +37,10 @@ def test_build_dashboard_navigator():
     result = build_dashboard(envelopes, monthly_income=70000, tab='navigator', monthly_payments={}, monthly_spending={})
     assert "ВКЛАДКА: НАВИГАТОР" in result
     assert "Деньги:</b> <b>30к</b>" in result
-    assert "Свободно: <b>10к</b> (этого достаточно для полного покрытия месяца, осталось распределить! ✨)" in result
-    assert "ОБЯЗАТЕЛЬСТВА:</b> <b>40к</b>" in result
-    assert "Обеспечено: <b>30к</b>" in result
-    assert "Не хватает: <b>10к</b>" in result
-    assert "Обеспеченность месяца:</b> <b>75%</b>" in result
+    assert "Свободно: <b>10к</b> (хватит, чтобы покрыть еще <b>10к</b> обязательств 💡)" in result
+    assert "До конца месяца нужно закрыть:</b> <b>40к</b>" in result
+    assert "Уже закрыто:</b> <b>25к</b>" in result
+    assert "Осталось:</b> <b>15к</b>" in result
 
     # Test when unallocated is enough to cover deficit
     envelopes_enough = [
@@ -50,8 +49,8 @@ def test_build_dashboard_navigator():
         MockEnvelope(3, "Нераспределённые", 20000, 0, is_debt=False, is_goal=False),
     ]
     result_enough = build_dashboard(envelopes_enough, monthly_income=70000, tab='navigator', monthly_payments={}, monthly_spending={})
-    assert "Свободно: <b>20к</b>" in result_enough
-    assert "Не хватает: <b>0</b>" in result_enough
+    assert "Свободно: <b>20к</b> (этого достаточно для полного покрытия месяца, осталось распределить! ✨)" in result_enough
+    assert "Осталось:</b> <b>15к</b>" in result_enough
 
 def test_build_dashboard_expenses():
     envelopes = [
@@ -164,10 +163,10 @@ def test_absolute_due_days_and_last_paid_month():
     assert status == "Оплачено ✅"
     
     # 4. Verify navigator math for marked paid envelope:
-    result_nav = build_dashboard(envelopes, monthly_income=50000, tab='navigator', monthly_payments={}, monthly_spending={})
-    assert "ОБЯЗАТЕЛЬСТВА:</b> <b>41.5к</b>" in result_nav
-    assert "Обеспечено: <b>1.5к</b>" in result_nav
-    assert "Не хватает: <b>40к</b>" in result_nav
+    result_nav = build_dashboard(envelopes, monthly_income=50000, tab='navigator', monthly_payments={}, monthly_spending={}, monthly_adjustments={3: 1500.0})
+    assert "До конца месяца нужно закрыть:</b> <b>41.5к</b>" in result_nav
+    assert "Уже закрыто:</b> <b>1.5к</b>" in result_nav
+    assert "Осталось:</b> <b>40к</b>" in result_nav
 
 
 def test_paid_confirmations_formatting():
