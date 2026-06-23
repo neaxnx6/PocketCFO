@@ -575,8 +575,10 @@ async def complete_onboarding(user_id: int, cash: float, income: float, debts: l
         # If user has cash > 0 and has at least one expense/debt envelope, ask AI for first recommended plan
         has_targets = len(debts) > 0 or len(expenses) > 0
         if cash > 0.0 and has_targets:
-            await wait_msg.edit_text("⏳ <i>Бюджет настроен. Формирую твое первое действие с деньгами...</i>", parse_mode="HTML")
-            
+            try:
+                await wait_msg.edit_text("⏳ <i>Настраиваю ваш бюджет и анализирую данные...</i>", parse_mode="HTML")
+            except:    
+                pass
             # Fetch envelopes with their generated IDs
             async with async_session_maker() as session:
                 env_res = await session.execute(select(Envelope).where(Envelope.user_id == user_id))

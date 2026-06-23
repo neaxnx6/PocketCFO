@@ -742,12 +742,6 @@ def get_financial_insight(
             unique_items.append((name, needed))
 
     if unique_items:
-        # Deficit block
-        deficit_lines = []
-        for name, needed in unique_items[:4]:  # limit to top 4
-            deficit_lines.append(f"• {name} (не хватает <b>{fmt_money(needed)}</b>)")
-        deficit_text = "<b>Очередь финансирования:</b>\n" + "\n".join(deficit_lines)
-
         # Plan of action
         action_lines = []
         if len(unique_items) >= 1:
