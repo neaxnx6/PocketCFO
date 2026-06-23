@@ -258,21 +258,20 @@ def get_days_left(due_day: Optional[int], current_day: int) -> int:
     return 30 + due_day - current_day
 
 
-def get_sorting_priority(e, current_day: int, monthly_payments: dict, monthly_spending: dict) -> int:
+def get_sorting_priority(e, current_day: int, monthly_payments: dict, monthly_spending: dict, monthly_adjustments: dict = None) -> int:
+    monthly_adjustments = monthly_adjustments or {}
     due_day = getattr(e, 'due_day', None)
     if due_day is None:
         return 999
         
-    current_month_str = datetime.utcnow().strftime("%Y-%m")
-    if getattr(e, 'last_paid_month', None) == current_month_str:
-        return 999
 
+    adj_val = monthly_adjustments.get(e.id, 0.0)
     if getattr(e, 'is_debt', False):
-        paid = monthly_payments.get(e.id, 0.0)
+        paid = monthly_payments.get(e.id, 0.0) + adj_val
         min_pay = getattr(e, 'min_payment', 0.0) or 0.0
         is_paid = paid >= min_pay
     else:
-        spent = monthly_spending.get(e.id, 0.0)
+        spent = monthly_spending.get(e.id, 0.0) + adj_val
         target = getattr(e, 'target_amount', 0.0) or 0.0
         is_paid = (getattr(e, 'current_amount', 0.0) + spent) >= target
         
@@ -285,10 +284,8 @@ def get_sorting_priority(e, current_day: int, monthly_payments: dict, monthly_sp
     return due_day - current_day
 
 
-def get_envelope_due_status_str(e, spent_this_month: float, current_day: int) -> str:
-    current_month_str = datetime.utcnow().strftime("%Y-%m")
-    if getattr(e, 'last_paid_month', None) == current_month_str:
-        return "Оплачено ✅"
+def get_envelope_due_status_str(e, spent_this_month: float, current_day: int, adj_val: float = 0.0) -> str:
+    spent_this_month += adj_val
 
     due_day = getattr(e, 'due_day', None)
     if getattr(e, 'is_debt', False):
@@ -708,19 +705,19 @@ def get_financial_insight(
     # Build queue list
     queue_items = []
     # 1. Base
-    underfunded_base_sorted = sorted(underfunded_base, key=lambda x: get_sorting_priority(x, current_day, monthly_payments, monthly_spending))
+    underfunded_base_sorted = sorted(underfunded_base, key=lambda x: get_sorting_priority(x, current_day, monthly_payments, monthly_spending, monthly_adjustments))
     for e in underfunded_base_sorted:
         spent = monthly_spending.get(e.id, 0.0)
         needed = max(0.0, (e.target_amount or 0.0) - (e.current_amount + spent))
         queue_items.append((e.name, needed))
         
     # 2. Min payments
-    underfunded_mins_sorted = sorted(underfunded_mins, key=lambda x: get_sorting_priority(x[0], current_day, monthly_payments, monthly_spending))
+    underfunded_mins_sorted = sorted(underfunded_mins, key=lambda x: get_sorting_priority(x[0], current_day, monthly_payments, monthly_spending, monthly_adjustments))
     for d, needed in underfunded_mins_sorted:
         queue_items.append((f"{d.name} (мин. платёж)", needed))
         
     # 3. Other
-    underfunded_other_sorted = sorted(underfunded_other, key=lambda x: get_sorting_priority(x, current_day, monthly_payments, monthly_spending))
+    underfunded_other_sorted = sorted(underfunded_other, key=lambda x: get_sorting_priority(x, current_day, monthly_payments, monthly_spending, monthly_adjustments))
     for e in underfunded_other_sorted:
         spent = monthly_spending.get(e.id, 0.0)
         needed = max(0.0, (e.target_amount or 0.0) - (e.current_amount + spent))
@@ -731,7 +728,7 @@ def get_financial_insight(
         queue_items.append(("Буфер безопасности", buffer_needed))
         
     # 5. Goals
-    underfunded_goals_sorted = sorted(underfunded_goals, key=lambda x: get_sorting_priority(x, current_day, monthly_payments, monthly_spending))
+    underfunded_goals_sorted = sorted(underfunded_goals, key=lambda x: get_sorting_priority(x, current_day, monthly_payments, monthly_spending, monthly_adjustments))
     for g in underfunded_goals_sorted:
         needed = max(0.0, (g.target_amount or 0.0) - g.current_amount)
         queue_items.append((g.name, needed))
@@ -934,10 +931,7 @@ def build_dashboard(
                         spent = monthly_spending.get(e.id, 0.0) if monthly_spending else 0.0
                         adj_val = monthly_adjustments.get(e.id, 0.0)
                         rem_limit = max(0.0, target - (spent + adj_val))
-                        is_settled = (
-                            getattr(e, 'last_paid_month', None) == current_month_str 
-                            or e.current_amount >= rem_limit
-                        )
+                        is_settled = (rem_limit <= 0)
                         if is_settled:
                             settled_count += 1
                             
@@ -964,7 +958,7 @@ def build_dashboard(
             for d in active_debts_with_min:
                 paid_this_month = monthly_payments.get(d.id, 0.0) if monthly_payments else 0.0
                 paid_min = min(paid_this_month, d.min_payment)
-                status = get_envelope_due_status_str(d, paid_this_month, current_day)
+                status = get_envelope_due_status_str(d, paid_this_month, current_day, monthly_adjustments.get(d.id, 0.0))
                 status_suffix = f" ({status})" if status else ""
                 due_str = f" (до {d.due_day}-го)" if d.due_day else ""
                 min_pay_lines.append(f"• {d.name}{due_str} (обязательный платеж): оплачено <b>{fmt_money(paid_min)}</b> из <b>{fmt_money(d.min_payment)}</b>{status_suffix}")
@@ -982,7 +976,7 @@ def build_dashboard(
                 pct = int((e.current_amount / e.target_amount * 100)) if e.target_amount else 0
                 pct_str = f", погашено <b>{pct}%</b>" if pct >= 10 else ""
                 paid_this_month = monthly_payments.get(e.id, 0.0) if monthly_payments else 0.0
-                status = get_envelope_due_status_str(e, paid_this_month, current_day)
+                status = get_envelope_due_status_str(e, paid_this_month, current_day, monthly_adjustments.get(e.id, 0.0))
                 status_suffix = f" — <i>{status}</i>" if status else ""
                 due_str = f" (до {e.due_day}-го)" if e.due_day else ""
                 credit_lines.append(f"• {e.name}{due_str}: осталось <b>{fmt_money(rem)}</b> (мин. платёж <b>{fmt_money(e.min_payment)}</b>{pct_str}){status_suffix}")
@@ -997,7 +991,7 @@ def build_dashboard(
                 pct_str = f", погашено <b>{pct}%</b>" if pct >= 10 else ""
                 credit_lines_term = f" ({pct_str.lstrip(', ')})" if pct_str else ""
                 paid_this_month = monthly_payments.get(e.id, 0.0) if monthly_payments else 0.0
-                status = get_envelope_due_status_str(e, paid_this_month, current_day)
+                status = get_envelope_due_status_str(e, paid_this_month, current_day, monthly_adjustments.get(e.id, 0.0))
                 status_suffix = f" — <i>{status}</i>" if status else ""
                 due_str = f" (до {e.due_day}-го)" if e.due_day else ""
                 personal_lines.append(f"• {e.name}{due_str}: осталось <b>{fmt_money(rem)}</b>{credit_lines_term}{status_suffix}")
@@ -2231,15 +2225,10 @@ async def show_group_details(callback: CallbackQuery):
             limit_str = f" (лимит {fmt_money(e.target_amount or 0)})" if e.target_amount else ""
             due_str = f" (до {e.due_day}-го)" if e.due_day else ""
             
-            if remaining_limit == 0:
+            if remaining_limit <= 0:
                 lines.append(f"• {e.name}{due_str}: Оплачено в этом месяце ✅{limit_str}")
             else:
                 lines.append(f"• {e.name}{due_str}: Нужно закрыть <b>{fmt_money(remaining_limit)}</b> (на балансе: <b>{fmt_money(e.current_amount)}</b>)")
-                # Add button to mark as paid outside
-                buttons.append([InlineKeyboardButton(
-                    text=f"✅ {e.name} уже оплачено вне бота", 
-                    callback_data=f"mark_paid:{grp_name}:{e.id}"
-                )])
             
         text = (
             f"🔍 <b>Детализация категории: {grp_name}</b>\n\n"
@@ -2250,66 +2239,6 @@ async def show_group_details(callback: CallbackQuery):
         reply_markup = InlineKeyboardMarkup(inline_keyboard=buttons)
         
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=reply_markup)
-
-
-@router.callback_query(F.data.startswith("mark_paid:"))
-async def mark_paid_callback(callback: CallbackQuery):
-    _, grp_name, env_id_str = callback.data.split(":", 2)
-    env_id = int(env_id_str)
-    
-    async with async_session_maker() as session:
-        user_result = await session.execute(select(User).where(User.telegram_id == callback.from_user.id))
-        user = user_result.scalar_one_or_none()
-        if not user:
-            await callback.answer()
-            return
-            
-        budget_owner = user
-        if user.family_host_id:
-            host_result = await session.execute(select(User).where(User.telegram_id == user.family_host_id))
-            host = host_result.scalar_one_or_none()
-            if host:
-                budget_owner = host
-                
-        env_result = await session.execute(
-            select(Envelope)
-            .where(Envelope.id == env_id)
-            .where(Envelope.user_id == budget_owner.telegram_id)
-        )
-        env = env_result.scalar_one_or_none()
-        
-        if env:
-            current_month_str = datetime.utcnow().strftime("%Y-%m")
-            amount = env.target_amount or 0.0
-            if amount > 0:
-                existing_stmt = await session.execute(
-                    select(BudgetSyncAdjustment)
-                    .where(BudgetSyncAdjustment.envelope_id == env.id)
-                    .where(BudgetSyncAdjustment.month == current_month_str)
-                )
-                existing_adj = existing_stmt.scalar_one_or_none()
-                if existing_adj:
-                    existing_adj.amount = amount
-                    existing_adj.source = "user_direct_mark"
-                else:
-                    new_adj = BudgetSyncAdjustment(
-                        envelope_id=env.id,
-                        amount=amount,
-                        month=current_month_str,
-                        source="user_direct_mark",
-                        reason="Отмечено пользователем вручную (вне бота)"
-                    )
-                    session.add(new_adj)
-                await session.commit()
-                await callback.answer("✅ Отмечено как оплачено вне бота!")
-            else:
-                await callback.answer("У статьи нет целевой суммы", show_alert=True)
-        else:
-            await callback.answer("Конверт не найден", show_alert=True)
-            
-    # Refresh the view
-    callback.data = f"detail_grp:{grp_name}"
-    await show_group_details(callback)
 
 
 @router.callback_query(F.data == "back_to_expenses")
